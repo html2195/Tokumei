@@ -1,7 +1,7 @@
-import { MAX_FIELDS, emptyWorkspace, makeBackup, mergeGraph, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace } from "./storage.js";
-import { CHARACTER_OPTIONS, GENDER_LABELS, VOICE_OPTIONS, generatePersona } from "./personas.js";
+import { MAX_FIELDS, emptyWorkspace, makeBackup, mergeGraph, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace } from "./storage.js?v=f977e0b";
+import { CHARACTER_OPTIONS, GENDER_LABELS, VOICE_OPTIONS, generatePersona } from "./personas.js?v=f977e0b";
 import { createMailbox, deleteMailbox, getMessage, listMessages } from "./mail.js";
-import { createGraphView } from "./graph.js";
+import { createGraphView } from "./graph.js?v=f977e0b";
 
 const element = id => document.getElementById(id);
 const recordForm = element("record-form");
