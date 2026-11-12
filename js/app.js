@@ -1,7 +1,8 @@
-import { MAX_FIELDS, emptyWorkspace, makeBackup, mergeGraph, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace } from "./storage.js?v=f977e0b";
+import { MAX_FIELDS, emptyWorkspace, hasLegacyWorkspace, makeBackup, mergeWorkspaceData, moveLegacyWorkspace, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace, workspaceStorageKey } from "./storage.js?v=accounts-1";
 import { CHARACTER_OPTIONS, GENDER_LABELS, VOICE_OPTIONS, generatePersona } from "./personas.js?v=f977e0b";
 import { createMailbox, deleteMailbox, getMessage, listMessages } from "./mail.js";
-import { createGraphView } from "./graph.js?v=f977e0b";
+import { createGraphView } from "./graph.js?v=accounts-1";
+import { authenticate, endSession, generateLogin, restoreSession } from "./auth.js?v=accounts-1";
 
 const element = id => document.getElementById(id);
 const recordForm = element("record-form");
@@ -15,6 +16,10 @@ const routes = ["overview", "graph", "data", "personas", "mail"];
 const escapeCharacters = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
 let workspace = emptyWorkspace();
+let account = null;
+let accountGeneration = 0;
+let authMode = "login";
+let authBusy = false;
 let route = "overview";
 let editingRecordId = null;
 let profile = null;
@@ -61,8 +66,125 @@ function setNotice(id, message = "") {
   notice.hidden = !message;
 }
 
-function commit(update) {
-  workspace = updateWorkspace(update);
+function commit(update, ownerId = account?.id) {
+  const saved = updateWorkspace(ownerId, update);
+  if (account?.id === ownerId) workspace = saved;
+}
+
+function updateLegacyPanel() {
+  const panel = element("legacy-panel");
+  try {
+    panel.hidden = !account || !hasLegacyWorkspace();
+  } catch {
+    panel.hidden = true;
+  }
+}
+
+function changeAccount(next) {
+  account = next;
+  accountGeneration++;
+  workspace = emptyWorkspace();
+  if (next) {
+    try {
+      workspace = readWorkspace(next.id);
+    } catch {
+      notify("Не удалось прочитать данные учётной записи в этом браузере.");
+    }
+  }
+  profile = null;
+  editingRecordId = null;
+  mailboxId = null;
+  inbox = newInbox();
+  changingMailboxes = false;
+  messageRequest++;
+  for (const dialog of document.querySelectorAll("dialog[open]")) dialog.close();
+  recordForm.reset();
+  element("custom-fields").replaceChildren();
+  element("open-record-link").removeAttribute("href");
+  element("message-body").replaceChildren();
+  element("message-title").textContent = "Письмо";
+  element("confirm-text").textContent = "";
+  element("record-search").value = "";
+  element("category-filter").value = "";
+  element("persona-form").reset();
+  setNotice("mail-error");
+  setNotice("persona-error");
+  graphView.reset();
+  element("account-login").textContent = next?.login ?? "";
+  element("workspace-skip").hidden = !next;
+  element("app-shell").hidden = !next;
+  element("auth-screen").hidden = Boolean(next);
+  updateLegacyPanel();
+  render();
+  if (next) showRoute();
+}
+
+function setAuthBusy(busy) {
+  authBusy = busy;
+  for (const control of document.querySelectorAll("#auth-screen button")) control.disabled = busy;
+  element("auth-login").readOnly = busy;
+  element("auth-password").readOnly = busy;
+  element("auth-submit").textContent = busy ? "Подождите…" : authMode === "register" ? "Создать учётную запись" : "Войти";
+}
+
+function setAuthMode(mode) {
+  authMode = mode;
+  const register = mode === "register";
+  element("auth-title").textContent = register ? "Создать учётную запись" : "Вход в Tokumei";
+  element("auth-intro").textContent = register
+    ? "Для регистрации нужны только логин и пароль."
+    : "Введите логин и пароль своей учётной записи.";
+  element("auth-login").value = register ? generateLogin() : "";
+  element("auth-password").value = "";
+  element("auth-password").autocomplete = register ? "new-password" : "current-password";
+  element("auth-generate").hidden = !register;
+  element("auth-hint").hidden = !register;
+  element("auth-password").setAttribute("aria-describedby", register ? "auth-hint" : "");
+  for (const button of document.querySelectorAll("[data-auth-mode]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.authMode === mode));
+  }
+  document.title = `${register ? "Регистрация" : "Вход"} · Tokumei`;
+  setNotice("auth-error");
+  setAuthBusy(false);
+}
+
+async function submitAuth(event) {
+  event.preventDefault();
+  if (authBusy) return;
+  const login = element("auth-login").value.trim();
+  const password = element("auth-password").value;
+  if (!/^[a-z0-9][a-z0-9_-]{2,31}$/i.test(login)) {
+    setNotice("auth-error", "Логин должен содержать 3–32 символа. Подойдут латинские буквы, цифры, дефис и подчёркивание.");
+    return;
+  }
+  if (authMode === "register" && Array.from(password).length < 15) {
+    setNotice("auth-error", "Пароль должен содержать от 15 символов.");
+    return;
+  }
+  setNotice("auth-error");
+  setAuthBusy(true);
+  try {
+    changeAccount(await authenticate(authMode, login, password));
+    element("auth-form").reset();
+    element("workspace").focus({ preventScroll: true });
+  } catch (error) {
+    setNotice("auth-error", error.message);
+  } finally {
+    element("auth-password").value = "";
+    setAuthBusy(false);
+  }
+}
+
+async function signOut() {
+  const revocation = endSession();
+  changeAccount(null);
+  setAuthMode("login");
+  element("auth-login").focus();
+  try {
+    await revocation;
+  } catch {
+    if (!account) notify("Вход завершён в этом браузере. Серверная сессия истечёт автоматически.");
+  }
 }
 
 function chips(values) {
@@ -186,13 +308,14 @@ function saveRecord(event) {
 }
 
 function confirmRemoval(title, description) {
+  const generation = accountGeneration;
   const dialog = element("confirm-dialog");
   element("confirm-title").textContent = title;
   element("confirm-text").textContent = description;
   dialog.returnValue = "";
   dialog.showModal();
   return new Promise(resolve => {
-    dialog.addEventListener("close", () => resolve(dialog.returnValue === "delete"), { once: true });
+    dialog.addEventListener("close", () => resolve(dialog.returnValue === "delete" && accountGeneration === generation), { once: true });
   });
 }
 
@@ -365,38 +488,45 @@ async function refreshInbox(cursor = null) {
 }
 
 async function addMailbox() {
-  if (changingMailboxes) return;
+  const ownerId = account?.id;
+  const generation = accountGeneration;
+  if (!ownerId || changingMailboxes) return;
   changingMailboxes = true;
   setNotice("mail-error");
   renderMail();
   let mailbox;
   try {
-    commit(() => {});
+    commit(() => {}, ownerId);
     mailbox = await createMailbox();
-    commit(data => { data.mailboxes.push(mailbox); });
+    commit(data => { data.mailboxes.push(mailbox); }, ownerId);
+    if (generation !== accountGeneration) return;
     mailboxId = mailbox.id;
     inbox = newInbox();
     notify("Временный ящик создан");
   } catch (error) {
-    setNotice("mail-error", error.message);
+    if (generation === accountGeneration) setNotice("mail-error", error.message);
     if (mailbox) {
       try {
         await deleteMailbox(mailbox);
       } catch {
-        setNotice("mail-error", `${error.message} Адрес ${mailbox.address} истечёт автоматически.`);
+        if (generation === accountGeneration) {
+          setNotice("mail-error", `${error.message} Адрес ${mailbox.address} истечёт автоматически.`);
+        }
       }
     }
     mailbox = null;
   } finally {
-    changingMailboxes = false;
-    render();
+    if (generation === accountGeneration) changingMailboxes = false;
+    if (account?.id === ownerId) render();
   }
   if (mailbox) await refreshInbox();
 }
 
 async function removeMailbox() {
+  const ownerId = account?.id;
+  const generation = accountGeneration;
   const mailbox = workspace.mailboxes.find(box => box.id === mailboxId);
-  if (!mailbox || changingMailboxes) return;
+  if (!ownerId || !mailbox || changingMailboxes) return;
   if (!await confirmRemoval("Убрать ящик?", "Tokumei уберёт адрес из списка и очистит входящие письма.")) return;
   changingMailboxes = true;
   setNotice("mail-error");
@@ -408,14 +538,15 @@ async function removeMailbox() {
       for (const persona of data.personas) {
         if (persona.mailboxId === mailbox.id) persona.mailboxId = null;
       }
-    });
+    }, ownerId);
+    if (generation !== accountGeneration) return;
     if (profile?.mailboxId === mailbox.id) profile = { ...profile, mailboxId: null };
     notify("Ящик удалён");
   } catch (error) {
-    setNotice("mail-error", error.message);
+    if (generation === accountGeneration) setNotice("mail-error", error.message);
   } finally {
-    changingMailboxes = false;
-    render();
+    if (generation === accountGeneration) changingMailboxes = false;
+    if (account?.id === ownerId) render();
   }
   if (!inbox.loaded) await refreshInbox();
 }
@@ -474,35 +605,20 @@ function exportWorkspace() {
 }
 
 async function importWorkspace(event) {
+  const generation = accountGeneration;
   const input = event.currentTarget;
   const file = input.files[0];
   input.value = "";
-  if (!file) return;
+  if (!file || !account) return;
   try {
     const backup = parseBackup(await file.text());
+    if (generation !== accountGeneration) return;
     let changed = 0;
-    commit(data => {
-      const records = new Map(data.records.map(record => [record.id, record]));
-      for (const record of backup.records) {
-        const previous = records.get(record.id);
-        if (previous && previous.updatedAt >= record.updatedAt) continue;
-        records.set(record.id, record);
-        changed++;
-      }
-      data.records = [...records.values()];
-      const personas = new Map(data.personas.map(persona => [persona.id, persona]));
-      for (const persona of backup.personas) {
-        if (personas.has(persona.id)) continue;
-        personas.set(persona.id, persona);
-        changed++;
-      }
-      data.personas = [...personas.values()];
-      changed += mergeGraph(data.graph, backup.graph);
-    });
+    commit(data => { changed = mergeWorkspaceData(data, backup); });
     render();
     notify(changed ? `Импортировано элементов — ${changed}` : "Новых данных в файле нет");
   } catch (error) {
-    notify(error.message);
+    if (generation === accountGeneration) notify(error.message);
   }
 }
 
@@ -515,6 +631,7 @@ function render() {
 }
 
 function showRoute(focus = false) {
+  if (!account) return;
   const hash = location.hash.slice(1);
   route = routes.includes(hash) ? hash : "overview";
   for (const view of document.querySelectorAll("[data-view]")) view.hidden = view.dataset.view !== route;
@@ -532,6 +649,23 @@ function showRoute(focus = false) {
 }
 
 const actions = {
+  "sign-out": signOut,
+  "move-legacy": async button => {
+    const generation = accountGeneration;
+    button.disabled = true;
+    let moved;
+    try {
+      moved = await moveLegacyWorkspace(account.id);
+    } finally {
+      button.disabled = false;
+    }
+    if (generation !== accountGeneration) return;
+    workspace = moved;
+    updateLegacyPanel();
+    render();
+    if (route === "mail" && !inbox.loaded) void refreshInbox();
+    notify("Прежние данные перенесены");
+  },
   "new-record": () => openRecord(),
   "open-record": button => openRecord(workspace.records.find(record => record.id === button.dataset.id)),
   "close-dialog": button => button.closest("dialog").close(),
@@ -604,7 +738,7 @@ const actions = {
 
 document.addEventListener("click", async event => {
   const button = event.target.closest("button[data-action]");
-  if (!button) return;
+  if (!button || !account) return;
   try {
     await actions[button.dataset.action](button);
   } catch (error) {
@@ -630,10 +764,13 @@ element("record-search").addEventListener("input", renderRecords);
 element("category-filter").addEventListener("change", renderRecords);
 element("import-file").addEventListener("change", importWorkspace);
 window.addEventListener("hashchange", () => showRoute(true));
-window.addEventListener("storage", () => {
+window.addEventListener("storage", event => {
+  if (!account) return;
+  updateLegacyPanel();
+  if (event.key && event.key !== workspaceStorageKey(account.id)) return;
   try {
     const wasSaved = workspace.personas.some(persona => persona.id === profile?.id);
-    workspace = readWorkspace();
+    workspace = readWorkspace(account.id);
     if (wasSaved && !workspace.personas.some(persona => persona.id === profile?.id)) profile = null;
     render();
     if (route === "mail" && !inbox.loaded) void refreshInbox();
@@ -642,7 +779,7 @@ window.addEventListener("storage", () => {
   }
 });
 setInterval(() => {
-  if (route === "mail" && !document.hidden && !inbox.error && !inbox.paginated) void refreshInbox();
+  if (account && route === "mail" && !document.hidden && !inbox.error && !inbox.paginated) void refreshInbox();
 }, 30000);
 
 const graphView = createGraphView({
@@ -661,10 +798,24 @@ for (const [id, options] of [
   element(id).append(...options.map(([value, label]) => new Option(label, value)));
 }
 
-try {
-  workspace = readWorkspace();
-} catch {
-  notify("Не удалось прочитать данные этого браузера.");
+for (const button of document.querySelectorAll("[data-auth-mode]")) {
+  button.addEventListener("click", () => {
+    if (!authBusy && authMode !== button.dataset.authMode) setAuthMode(button.dataset.authMode);
+  });
 }
-render();
-showRoute();
+element("auth-generate").addEventListener("click", () => {
+  element("auth-login").value = generateLogin();
+  element("auth-login").focus();
+});
+element("auth-form").addEventListener("submit", submitAuth);
+
+setAuthMode("login");
+setAuthBusy(true);
+try {
+  const savedAccount = await restoreSession();
+  if (savedAccount) changeAccount(savedAccount);
+} catch (error) {
+  setNotice("auth-error", error.message);
+} finally {
+  setAuthBusy(false);
+}

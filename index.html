@@ -5,15 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0c120f">
     <meta name="description" content="Личное рабочее пространство с картой связей, записями, вымышленными персонажами и временной почтой.">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.nextmail.sh; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.nextmail.sh https://hebezaffdeqrpjhamcqq.supabase.co; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Tokumei</title>
     <link rel="icon" type="image/png" href="./favicon.png">
-    <link rel="stylesheet" href="./styles.css?v=f977e0b">
-    <script type="module" src="./js/app.js?v=f977e0b"></script>
+    <link rel="stylesheet" href="./styles.css?v=accounts-1">
+    <script type="module" src="./js/app.js?v=accounts-1"></script>
   </head>
   <body>
-    <a class="skip-link" href="#workspace">К содержимому</a>
-    <div class="shell">
+    <main class="auth-screen" id="auth-screen">
+      <section class="surface auth-card" aria-labelledby="auth-title">
+        <div class="brand auth-brand"><span class="brand-mark" aria-hidden="true"></span><span>Tokumei</span></div>
+        <h1 id="auth-title">Вход в Tokumei</h1>
+        <p class="auth-intro" id="auth-intro">Введите логин и пароль своей учётной записи.</p>
+        <div class="auth-tabs" aria-label="Доступ к Tokumei">
+          <button class="button secondary" type="button" data-auth-mode="login" aria-pressed="true">Вход</button>
+          <button class="button secondary" type="button" data-auth-mode="register" aria-pressed="false">Регистрация</button>
+        </div>
+        <form class="auth-form" id="auth-form">
+          <label class="field" for="auth-login">Логин</label>
+          <div class="auth-login-row">
+            <input id="auth-login" name="login" minlength="3" maxlength="32" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+            <button class="button secondary" type="button" id="auth-generate" hidden>Сгенерировать</button>
+          </div>
+          <label class="field">Пароль<input id="auth-password" type="password" name="password" maxlength="256" autocomplete="current-password" required></label>
+          <p class="auth-hint" id="auth-hint" hidden>Пароль от 15 символов. Можно использовать длинную фразу.</p>
+          <p class="notice" id="auth-error" role="alert" hidden></p>
+          <button class="button primary" id="auth-submit" type="submit">Войти</button>
+        </form>
+      </section>
+    </main>
+    <a class="skip-link" id="workspace-skip" href="#workspace" hidden>К содержимому</a>
+    <div class="shell" id="app-shell" hidden>
       <aside class="sidebar">
         <a class="brand" href="#overview">
           <span class="brand-mark" aria-hidden="true"></span>
@@ -29,9 +51,17 @@
           <span class="status-dot" aria-hidden="true"></span>
           <div><strong>Локальное хранилище</strong><span>Данные в этом браузере</span></div>
         </div>
+        <div class="account-panel">
+          <span class="account-login" id="account-login"></span>
+          <button class="button secondary small" type="button" data-action="sign-out">Выйти</button>
+        </div>
       </aside>
 
       <main class="workspace" id="workspace" tabindex="-1">
+        <aside class="surface legacy-panel" id="legacy-panel" hidden>
+          <div><h2>Прежние данные в этом браузере</h2><p>Перенесите их в текущую учётную запись.</p></div>
+          <button class="button secondary" type="button" data-action="move-legacy">Перенести данные</button>
+        </aside>
         <section class="view" id="overview-view" data-view="overview" aria-labelledby="overview-title">
           <header class="page-heading">
             <div>

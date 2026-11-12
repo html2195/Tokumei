@@ -1,4 +1,4 @@
-import { addGraphEdge, GRAPH_TYPES, hasGraphEdge, normalizeGraphNode, safeUrl } from "./storage.js?v=f977e0b";
+import { addGraphEdge, GRAPH_TYPES, hasGraphEdge, normalizeGraphNode, safeUrl } from "./storage.js?v=accounts-1";
 
 const NODE_GAP_X = 310;
 const NODE_GAP_Y = 102;
@@ -468,5 +468,19 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     if (!fitted) fit();
     schedulePaint();
   }).observe(viewport);
-  return { render };
+  function reset() {
+    selectedId = null;
+    fitted = false;
+    drag = null;
+    nodeDraft = {};
+    edgeDraft = {};
+    nodeForm.reset();
+    edgeForm.reset();
+    edgeTarget.replaceChildren();
+    element("graph-node-context").textContent = "";
+    element("graph-edge-context").textContent = "";
+    viewport.classList.remove("dragging");
+    Object.assign(camera, { x: 0, y: 0, scale: 1, minScale: 0.2 });
+  }
+  return { render, reset };
 }
