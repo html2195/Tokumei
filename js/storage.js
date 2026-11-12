@@ -18,8 +18,8 @@ export function emptyWorkspace() {
   return { version: 1, records: [], personas: [], mailboxes: [], graph: emptyGraph() };
 }
 
-export function readWorkspace() {
-  const raw = localStorage.getItem(STORAGE_KEY);
+function readStoredWorkspace(key) {
+  const raw = localStorage.getItem(key);
   if (!raw) return emptyWorkspace();
   const data = JSON.parse(raw);
   if (data?.version !== 1 || ![data.records, data.personas, data.mailboxes].every(Array.isArray)) {
@@ -32,15 +32,49 @@ export function readWorkspace() {
   return data;
 }
 
-export function updateWorkspace(update) {
-  const data = readWorkspace();
+export function workspaceStorageKey(accountId) {
+  return `${STORAGE_KEY}.account.${accountId}`;
+}
+
+export function readWorkspace(accountId) {
+  return accountId ? readStoredWorkspace(workspaceStorageKey(accountId)) : emptyWorkspace();
+}
+
+export function updateWorkspace(accountId, update) {
+  if (!accountId) throw new Error("Войдите в Tokumei.");
+  const data = readWorkspace(accountId);
   update(data);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(workspaceStorageKey(accountId), JSON.stringify(data));
   } catch {
     throw new Error("Не удалось сохранить данные в браузере. Проверьте настройки хранилища и свободное место.");
   }
   return data;
+}
+
+export function hasLegacyWorkspace() {
+  const legacy = readStoredWorkspace(STORAGE_KEY);
+  return Boolean(legacy.records.length || legacy.personas.length || legacy.mailboxes.length || legacy.graph.nodes.length);
+}
+
+function moveLegacyData(accountId) {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return readWorkspace(accountId);
+  const legacy = readStoredWorkspace(STORAGE_KEY);
+  const updated = updateWorkspace(accountId, current => {
+    mergeWorkspaceData(current, legacy);
+    const ids = new Set(current.mailboxes.map(box => box.id));
+    current.mailboxes.push(...legacy.mailboxes.filter(box => !ids.has(box.id)));
+  });
+  if (localStorage.getItem(STORAGE_KEY) === raw) localStorage.removeItem(STORAGE_KEY);
+  return updated;
+}
+
+export async function moveLegacyWorkspace(accountId) {
+  if (globalThis.navigator?.locks) {
+    return navigator.locks.request("tokumei-legacy-workspace", () => moveLegacyData(accountId));
+  }
+  return moveLegacyData(accountId);
 }
 
 function string(value, limit) {
@@ -166,6 +200,27 @@ export function mergeGraph(graph, incoming) {
     added++;
   }
   return added;
+}
+
+export function mergeWorkspaceData(workspace, incoming) {
+  let changed = 0;
+  const records = new Map(workspace.records.map(record => [record.id, record]));
+  for (const record of incoming.records) {
+    const previous = records.get(record.id);
+    if (previous && previous.updatedAt >= record.updatedAt) continue;
+    records.set(record.id, record);
+    changed++;
+  }
+  workspace.records = [...records.values()];
+
+  const personas = new Map(workspace.personas.map(persona => [persona.id, persona]));
+  for (const persona of incoming.personas) {
+    if (personas.has(persona.id)) continue;
+    personas.set(persona.id, persona);
+    changed++;
+  }
+  workspace.personas = [...personas.values()];
+  return changed + mergeGraph(workspace.graph, incoming.graph);
 }
 
 function normalizePersona(input) {
