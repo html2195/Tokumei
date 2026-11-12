@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#17241e">
+    <meta name="theme-color" content="#0c120f">
     <meta name="description" content="Личное рабочее пространство для записей, вымышленных персонажей и временной почты.">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.nextmail.sh; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Tokumei</title>
@@ -43,17 +43,17 @@
           <div class="metrics">
             <a class="metric" href="#data">
               <span class="icon-box green"><span class="icon i-record" aria-hidden="true"></span></span>
-              <span class="metric-arrow" aria-hidden="true">↗</span>
+              <span class="arrow-out metric-arrow" aria-hidden="true"></span>
               <strong id="record-count">0</strong><span>Записи</span>
             </a>
             <a class="metric" href="#personas">
               <span class="icon-box lilac"><span class="icon i-person" aria-hidden="true"></span></span>
-              <span class="metric-arrow" aria-hidden="true">↗</span>
+              <span class="arrow-out metric-arrow" aria-hidden="true"></span>
               <strong id="persona-count">0</strong><span>Сохранённые персонажи</span>
             </a>
             <a class="metric" href="#mail">
               <span class="icon-box amber"><span class="icon i-mail" aria-hidden="true"></span></span>
-              <span class="metric-arrow" aria-hidden="true">↗</span>
+              <span class="arrow-out metric-arrow" aria-hidden="true"></span>
               <strong id="mail-count">0</strong><span>Временные ящики</span>
             </a>
           </div>
@@ -166,7 +166,7 @@
           </div>
           <datalist id="category-options"></datalist>
           <label class="field">Ссылка<input name="url" type="url" maxlength="2048" placeholder="https://"></label>
-          <a class="text-link record-link" id="open-record-link" target="_blank" rel="noopener noreferrer" hidden>Открыть ссылку <span aria-hidden="true">↗</span></a>
+          <a class="text-link record-link" id="open-record-link" target="_blank" rel="noopener noreferrer" hidden>Открыть ссылку <span class="arrow-out" aria-hidden="true"></span></a>
           <label class="field">Заметка<textarea name="notes" rows="5" maxlength="20000" placeholder="Добавьте нужные детали"></textarea></label>
           <div class="custom-fields-heading">
             <h3>Дополнительные поля</h3>
