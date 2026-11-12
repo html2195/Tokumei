@@ -1,7 +1,7 @@
 import { MAX_FIELDS, emptyWorkspace, makeBackup, mergeGraph, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace } from "./storage.js?v=f977e0b";
 import { CHARACTER_OPTIONS, GENDER_LABELS, VOICE_OPTIONS, generatePersona } from "./personas.js?v=f977e0b";
 import { createMailbox, deleteMailbox, getMessage, listMessages } from "./mail.js";
-import { createGraphView } from "./graph.js?v=f977e0b";
+import { createGraphView } from "./graph.js?v=black-hole-1";
 
 const element = id => document.getElementById(id);
 const recordForm = element("record-form");
@@ -534,6 +534,7 @@ function showRoute(focus = false) {
 const actions = {
   "new-record": () => openRecord(),
   "open-record": button => openRecord(workspace.records.find(record => record.id === button.dataset.id)),
+  privacy: () => element("privacy-dialog").showModal(),
   "close-dialog": button => button.closest("dialog").close(),
   "add-field": () => addField({}, true),
   "remove-field": button => {

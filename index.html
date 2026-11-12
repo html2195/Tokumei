@@ -3,15 +3,17 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#0c120f">
+    <meta name="theme-color" content="#08060d">
     <meta name="description" content="Личное рабочее пространство с картой связей, записями, вымышленными персонажами и временной почтой.">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.nextmail.sh; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Tokumei</title>
     <link rel="icon" type="image/png" href="./favicon.png">
-    <link rel="stylesheet" href="./styles.css?v=f977e0b">
-    <script type="module" src="./js/app.js?v=f977e0b"></script>
+    <link rel="stylesheet" href="./styles.css?v=black-hole-1">
+    <script type="module" src="./js/app.js?v=black-hole-1"></script>
+    <script type="module" src="./js/parallax.js?v=black-hole-1"></script>
   </head>
   <body>
+    <div class="space-field" aria-hidden="true"></div>
     <a class="skip-link" href="#workspace">К содержимому</a>
     <div class="shell">
       <aside class="sidebar">
@@ -25,15 +27,22 @@
           <a href="#personas" data-route="personas"><span class="icon i-person" aria-hidden="true"></span>Персонажи</a>
           <a href="#mail" data-route="mail"><span class="icon i-mail" aria-hidden="true"></span>Почта</a>
         </nav>
-        <div class="storage-status">
-          <span class="status-dot" aria-hidden="true"></span>
-          <div><strong>Локальное хранилище</strong><span>Данные в этом браузере</span></div>
+        <div class="sidebar-footer">
+          <div class="storage-status">
+            <span class="status-dot" aria-hidden="true"></span>
+            <div><strong>Локальное хранилище</strong><span>Данные в этом браузере</span></div>
+          </div>
+          <button class="privacy-link" type="button" data-action="privacy" aria-haspopup="dialog">Приватность</button>
         </div>
       </aside>
 
       <main class="workspace" id="workspace" tabindex="-1">
         <section class="view" id="overview-view" data-view="overview" aria-labelledby="overview-title">
-          <header class="page-heading">
+          <header class="page-heading overview-heading">
+            <div class="overview-scene" aria-hidden="true">
+              <div class="overview-art"></div>
+              <div class="overview-stars"></div>
+            </div>
             <div>
               <h1 id="overview-title">Рабочее пространство</h1>
               <p>Карта связей, записи, вымышленные персонажи и временная почта.</p>
@@ -214,6 +223,18 @@
         </section>
       </main>
     </div>
+
+    <dialog id="privacy-dialog" aria-labelledby="privacy-title">
+      <header class="dialog-heading">
+        <h2 id="privacy-title">Приватность</h2>
+        <button class="button icon-button" type="button" data-action="close-dialog" aria-label="Закрыть" autofocus>×</button>
+      </header>
+      <div class="dialog-body privacy-copy">
+        <p>Записи, карта связей и сохранённые персонажи остаются в хранилище браузера. У Tokumei нет собственной серверной базы, аналитики и журналов посещений.</p>
+        <p>GitHub Pages сохраняет IP-адреса посетителей для безопасности хостинга. <a class="text-link" href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection" target="_blank" rel="noopener noreferrer">Документация GitHub</a></p>
+        <p>Временные ящики и входящие письма обрабатывает Nextmail. Браузер обращается к нему напрямую и сохраняет доступ к ящикам в своём хранилище.</p>
+      </div>
+    </dialog>
 
     <dialog id="record-dialog" aria-labelledby="record-dialog-title">
       <form id="record-form" class="dialog-form">

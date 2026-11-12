@@ -144,7 +144,7 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     const end = { x: to.x - dx * inset, y: to.y - dy * inset };
     const angle = Math.atan2(dy, dx);
     const selected = edge.from === selectedId || edge.to === selectedId;
-    context.strokeStyle = selected ? "#baff65" : "#718d6f";
+    context.strokeStyle = selected ? "#dbc5ff" : "#8e7aab";
     context.lineWidth = selected ? 1.7 : 1.3;
     context.beginPath();
     context.moveTo(start.x, start.y);
@@ -168,9 +168,9 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     const horizontal = Math.abs(dx) >= Math.abs(dy);
     const x = (start.x + end.x) / 2 + (horizontal ? 0 : width / 2 + 8);
     const y = (start.y + end.y) / 2 - (horizontal ? 13 : 0);
-    context.fillStyle = "#0b110d";
+    context.fillStyle = "#0b0811";
     context.fillRect(x - width / 2, y - 10, width, 20);
-    context.fillStyle = "#d3e2d2";
+    context.fillStyle = "#d3cadf";
     context.fillText(label, x, y);
   }
 
