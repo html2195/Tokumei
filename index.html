@@ -4,7 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#0c120f">
-    <meta name="description" content="Личное рабочее пространство для записей, вымышленных персонажей и временной почты.">
+    <meta name="description" content="Личное рабочее пространство с картой связей, записями, вымышленными персонажами и временной почтой.">
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.nextmail.sh; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Tokumei</title>
     <link rel="icon" type="image/png" href="./favicon.png">
@@ -21,13 +21,13 @@
         </a>
         <nav class="navigation" aria-label="Разделы Tokumei">
           <a href="#overview" data-route="overview" aria-current="page"><span class="icon i-grid" aria-hidden="true"></span>Обзор</a>
-          <a href="#data" data-route="data"><span class="icon i-record" aria-hidden="true"></span>Данные</a>
+          <a href="#graph" data-route="data"><span class="icon i-record" aria-hidden="true"></span>Данные</a>
           <a href="#personas" data-route="personas"><span class="icon i-person" aria-hidden="true"></span>Персонажи</a>
           <a href="#mail" data-route="mail"><span class="icon i-mail" aria-hidden="true"></span>Почта</a>
         </nav>
         <div class="storage-status">
           <span class="status-dot" aria-hidden="true"></span>
-          <div><strong>Локальное хранилище</strong><span>Записи и профили в этом браузере</span></div>
+          <div><strong>Локальное хранилище</strong><span>Данные в этом браузере</span></div>
         </div>
       </aside>
 
@@ -36,7 +36,7 @@
           <header class="page-heading">
             <div>
               <h1 id="overview-title">Рабочее пространство</h1>
-              <p>Записи, вымышленные персонажи и временная почта в одном месте.</p>
+              <p>Карта связей, записи, вымышленные персонажи и временная почта.</p>
             </div>
             <button class="button primary" type="button" data-action="new-record"><span class="plus" aria-hidden="true">+</span> Новая запись</button>
           </header>
@@ -68,6 +68,11 @@
             <section aria-labelledby="quick-title">
               <div class="section-heading"><h2 id="quick-title">Быстрые действия</h2></div>
               <div class="surface quick-actions">
+                <a href="#graph">
+                  <span class="icon-box green"><span class="icon i-graph" aria-hidden="true"></span></span>
+                  <span><strong>Открыть карту связей</strong><small>Соединить сведения на схеме</small></span>
+                  <span class="action-arrow" aria-hidden="true">→</span>
+                </a>
                 <a href="#personas">
                   <span class="icon-box lilac"><span class="icon i-person" aria-hidden="true"></span></span>
                   <span><strong>Сгенерировать персонажа</strong><small>Возраст, характер и манера речи</small></span>
@@ -88,11 +93,54 @@
           </div>
         </section>
 
+        <section class="view" id="graph-view" data-view="graph" aria-labelledby="graph-title" hidden>
+          <header class="page-heading">
+            <div><h1 id="graph-title">Карта связей</h1><p>Соединяйте людей, контакты, источники и заметки на одной схеме.</p></div>
+            <button class="button primary" type="button" data-graph-action="new-node"><span class="plus" aria-hidden="true">+</span> Узел</button>
+          </header>
+          <div class="data-navigation">
+            <nav class="section-tabs" aria-label="Разделы данных">
+              <a href="#graph" aria-current="page">Карта связей</a><a href="#data">Записи</a>
+            </nav>
+            <div class="toolbar-actions">
+              <button class="button secondary small" type="button" data-action="import">Импорт</button>
+              <button class="button secondary small" type="button" data-action="export">Экспорт</button>
+            </div>
+          </div>
+          <div class="graph-layout">
+            <section class="surface graph-board" aria-label="Схема связей">
+              <div class="graph-toolbar">
+                <span class="graph-status" id="graph-count" role="status">Узлы 0 · Связи 0</span>
+                <div class="graph-controls" aria-label="Масштаб карты">
+                  <button class="button secondary small" type="button" data-graph-action="zoom-out" aria-label="Уменьшить масштаб">−</button>
+                  <span id="graph-scale">100%</span>
+                  <button class="button secondary small" type="button" data-graph-action="zoom-in" aria-label="Увеличить масштаб">+</button>
+                  <button class="button secondary small" type="button" data-graph-action="fit">Вписать</button>
+                </div>
+              </div>
+              <div class="graph-viewport" id="graph-viewport">
+                <canvas id="graph-edges" aria-hidden="true"></canvas>
+                <div class="graph-world" id="graph-world"></div>
+                <div class="empty graph-empty" id="graph-empty">
+                  <span class="icon-box green" aria-hidden="true"><span class="icon i-graph"></span></span>
+                  <h3>Добавьте первый узел</h3>
+                  <p>Например, внесите имя человека и соедините его с номером телефона.</p>
+                </div>
+              </div>
+              <p class="graph-help">Перетаскивайте узлы и фон карты.</p>
+            </section>
+            <aside class="surface graph-inspector" id="graph-inspector" aria-label="Свойства выбранного узла"></aside>
+          </div>
+        </section>
+
         <section class="view" id="data-view" data-view="data" aria-labelledby="data-title" hidden>
           <header class="page-heading">
-            <div><h1 id="data-title">Данные</h1><p>Храните заметки, ссылки и любые поля по категориям и тегам.</p></div>
+            <div><h1 id="data-title">Записи</h1><p>Храните заметки, ссылки и любые поля по категориям и тегам.</p></div>
             <button class="button primary" type="button" data-action="new-record"><span class="plus" aria-hidden="true">+</span> Новая запись</button>
           </header>
+          <nav class="section-tabs records-tabs" aria-label="Разделы данных">
+            <a href="#graph">Карта связей</a><a href="#data" aria-current="page">Записи</a>
+          </nav>
           <div class="data-toolbar">
             <label class="search-field"><span class="icon i-search" aria-hidden="true"></span>
               <span class="sr-only">Поиск по записям</span>
@@ -125,13 +173,28 @@
                   <label class="field">До<input name="ageMax" type="number" min="0" max="120" step="1" value="35" required></label>
                 </div>
               </fieldset>
-              <label class="field">Имя и фамилия
-                <select name="locale">
-                  <option value="uk">Украинские</option>
-                  <option value="ru">Русские</option>
-                  <option value="en">Английские</option>
-                </select>
-              </label>
+              <div class="two-fields">
+                <label class="field">Пол<select name="gender" id="persona-gender"><option value="">Случайный</option></select></label>
+                <label class="field">Язык имени
+                  <select name="locale">
+                    <option value="uk">Украинский</option>
+                    <option value="ru">Русский</option>
+                    <option value="en">Английский</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field">Характер<select name="character" id="persona-character"><option value="">Случайный</option></select></label>
+              <label class="field">Стиль общения<select name="voice" id="persona-voice"><option value="">По характеру</option></select></label>
+              <details class="persona-overrides">
+                <summary>Указать имя или занятие</summary>
+                <div class="persona-override-fields">
+                  <div class="two-fields">
+                    <label class="field">Имя<input name="firstName" maxlength="59" placeholder="Авто"></label>
+                    <label class="field">Фамилия<input name="lastName" maxlength="59" placeholder="Авто"></label>
+                  </div>
+                  <label class="field">Род занятий<input name="occupation" maxlength="100" placeholder="Авто"></label>
+                </div>
+              </details>
               <p class="notice" id="persona-error" role="alert" hidden></p>
               <button class="button primary" type="submit">Сгенерировать</button>
             </form>
@@ -179,6 +242,48 @@
           <button class="button danger quiet" id="delete-record" type="button" data-action="delete-record" hidden>Удалить</button>
           <button class="button secondary" type="button" data-action="close-dialog">Отмена</button>
           <button class="button primary" type="submit">Сохранить</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="graph-node-dialog" aria-labelledby="graph-node-title">
+      <form id="graph-node-form" class="dialog-form">
+        <header class="dialog-heading">
+          <h2 id="graph-node-title">Новый узел</h2>
+          <button class="button icon-button" type="button" data-action="close-dialog" aria-label="Закрыть">×</button>
+        </header>
+        <div class="dialog-body">
+          <p class="graph-context" id="graph-node-context" hidden></p>
+          <label class="field">Тип узла<select name="type" id="graph-node-type"></select></label>
+          <label class="field"><span id="graph-value-label">Значение</span><input name="value" required maxlength="180" autofocus></label>
+          <label class="field">Заметка<textarea name="notes" rows="3" maxlength="4000"></textarea></label>
+          <label class="field">Ссылка на источник<input name="source" type="url" maxlength="2048" placeholder="https://"></label>
+          <label class="field" id="graph-node-relation" hidden>Подпись связи<input name="relation" maxlength="80" placeholder="Найдено по имени"></label>
+          <p class="notice" id="graph-node-error" role="alert" hidden></p>
+        </div>
+        <footer class="dialog-footer">
+          <button class="button secondary" type="button" data-action="close-dialog">Отмена</button>
+          <button class="button primary" type="submit">Сохранить узел</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <dialog id="graph-edge-dialog" aria-labelledby="graph-edge-title">
+      <form id="graph-edge-form" class="dialog-form">
+        <header class="dialog-heading">
+          <h2 id="graph-edge-title">Новая связь</h2>
+          <button class="button icon-button" type="button" data-action="close-dialog" aria-label="Закрыть">×</button>
+        </header>
+        <div class="dialog-body">
+          <p class="graph-context" id="graph-edge-context"></p>
+          <label class="field" id="graph-edge-target">С каким узлом связать<select name="target" required></select></label>
+          <label class="field">Подпись связи<input name="label" maxlength="80" placeholder="Найдено по имени"></label>
+          <p class="notice" id="graph-edge-error" role="alert" hidden></p>
+        </div>
+        <footer class="dialog-footer">
+          <button class="button quiet" id="graph-delete-edge" type="button" data-graph-action="delete-edge" hidden>Удалить связь</button>
+          <button class="button secondary" type="button" data-action="close-dialog">Отмена</button>
+          <button class="button primary" type="submit">Сохранить связь</button>
         </footer>
       </form>
     </dialog>

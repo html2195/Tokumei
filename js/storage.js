@@ -1,8 +1,21 @@
 const STORAGE_KEY = "tokumei.workspace.v1";
 export const MAX_FIELDS = 16;
 
-function emptyWorkspace() {
-  return { version: 1, records: [], personas: [], mailboxes: [] };
+export const GRAPH_TYPES = {
+  person: { label: "Человек", valueLabel: "Имя и фамилия" },
+  phone: { label: "Телефон", valueLabel: "Номер телефона", inputMode: "tel" },
+  email: { label: "Почта", valueLabel: "Почтовый адрес", inputMode: "email" },
+  account: { label: "Аккаунт", valueLabel: "Имя пользователя или профиль" },
+  link: { label: "Ссылка", valueLabel: "Адрес ссылки", inputMode: "url" },
+  note: { label: "Заметка", valueLabel: "Название или факт" },
+};
+
+function emptyGraph() {
+  return { nodes: [], edges: [] };
+}
+
+export function emptyWorkspace() {
+  return { version: 1, records: [], personas: [], mailboxes: [], graph: emptyGraph() };
 }
 
 export function readWorkspace() {
@@ -11,6 +24,10 @@ export function readWorkspace() {
   const data = JSON.parse(raw);
   if (data?.version !== 1 || ![data.records, data.personas, data.mailboxes].every(Array.isArray)) {
     throw new Error("Формат локального хранилища не распознан.");
+  }
+  data.graph ??= emptyGraph();
+  if (!Array.isArray(data.graph.nodes) || !Array.isArray(data.graph.edges)) {
+    throw new Error("Формат карты связей не распознан.");
   }
   return data;
 }
@@ -75,6 +92,82 @@ export function normalizeRecord(input) {
   };
 }
 
+export function normalizeGraphNode(input) {
+  const value = string(input?.value, 180);
+  if (!value) throw new Error("Введите значение узла.");
+  const type = Object.hasOwn(GRAPH_TYPES, input.type) ? input.type : "note";
+  const rawSource = string(input.source, 2048);
+  const source = safeUrl(rawSource);
+  if (rawSource && !source) throw new Error("Введите адрес источника с http:// или https://.");
+  return {
+    id: identifier(input.id),
+    type,
+    value,
+    notes: string(input.notes, 4000),
+    source,
+    x: coordinate(input.x),
+    y: coordinate(input.y),
+  };
+}
+
+function coordinate(value) {
+  return Number.isFinite(value) ? Math.max(-1_000_000, Math.min(1_000_000, value)) : 0;
+}
+
+export function hasGraphEdge(graph, from, to) {
+  return graph.edges.some(edge => (edge.from === from && edge.to === to) || (edge.from === to && edge.to === from));
+}
+
+export function addGraphEdge(graph, input) {
+  const { from, to } = input;
+  const ids = new Set(graph.nodes.map(node => node.id));
+  if (from === to || !ids.has(from) || !ids.has(to)) throw new Error("Для связи выберите два разных узла.");
+  if (hasGraphEdge(graph, from, to)) throw new Error("Эти узлы уже связаны.");
+  const id = identifier(input.id);
+  if (graph.edges.some(edge => edge.id === id)) throw new Error("В карте повторяется идентификатор связи.");
+  graph.edges.push({ id, from, to, label: string(input.label, 80) });
+}
+
+function parseGraph(input) {
+  const graph = emptyGraph();
+  if (input === undefined) return graph;
+  if (!Array.isArray(input?.nodes) || !Array.isArray(input.edges)) {
+    throw new Error("Формат карты связей в резервной копии не распознан.");
+  }
+  const ids = new Map();
+  for (const original of input.nodes) {
+    const node = normalizeGraphNode(original);
+    if (typeof original.id !== "string" || !original.id || ids.has(original.id)) {
+      throw new Error("В карте связей есть узел с отсутствующим или повторяющимся идентификатором.");
+    }
+    ids.set(original.id, node.id);
+    graph.nodes.push(node);
+  }
+  for (const edge of input.edges) {
+    addGraphEdge(graph, { ...edge, from: ids.get(edge?.from), to: ids.get(edge?.to) });
+  }
+  return graph;
+}
+
+export function mergeGraph(graph, incoming) {
+  const nodes = new Set(graph.nodes.map(node => node.id));
+  const edges = new Set(graph.edges.map(edge => edge.id));
+  let added = 0;
+  for (const node of incoming.nodes) {
+    if (nodes.has(node.id)) continue;
+    graph.nodes.push(node);
+    nodes.add(node.id);
+    added++;
+  }
+  for (const edge of incoming.edges) {
+    if (edges.has(edge.id) || hasGraphEdge(graph, edge.from, edge.to)) continue;
+    graph.edges.push(edge);
+    edges.add(edge.id);
+    added++;
+  }
+  return added;
+}
+
 function normalizePersona(input) {
   const name = string(input?.name, 120);
   const age = input?.age;
@@ -85,6 +178,8 @@ function normalizePersona(input) {
   }
   return {
     id: identifier(input.id), name, age, description, style,
+    gender: ["male", "female"].includes(input.gender) ? input.gender : "",
+    occupation: string(input.occupation, 100),
     traits: (Array.isArray(input.traits) ? input.traits : []).map(trait => string(trait, 50)).filter(Boolean).slice(0, 8),
     example: string(input.example, 1000),
     createdAt: date(input.createdAt, new Date().toISOString()),
@@ -99,11 +194,15 @@ export function parseBackup(text) {
   } catch {
     throw new Error("Файл содержит некорректный JSON.");
   }
-  if (Array.isArray(data)) return { records: data.map(normalizeRecord), personas: [] };
+  if (Array.isArray(data)) return { records: data.map(normalizeRecord), personas: [], graph: emptyGraph() };
   if (data?.version !== 1 || !Array.isArray(data.records) || !Array.isArray(data.personas)) {
     throw new Error("Выберите резервную копию Tokumei или JSON-массив записей.");
   }
-  return { records: data.records.map(normalizeRecord), personas: data.personas.map(normalizePersona) };
+  return {
+    records: data.records.map(normalizeRecord),
+    personas: data.personas.map(normalizePersona),
+    graph: parseGraph(data.graph),
+  };
 }
 
 export function makeBackup(workspace) {
@@ -111,5 +210,6 @@ export function makeBackup(workspace) {
     version: 1,
     records: workspace.records,
     personas: workspace.personas.map(({ mailboxId, ...persona }) => persona),
+    graph: workspace.graph,
   }, null, 2);
 }

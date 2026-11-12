@@ -1,6 +1,7 @@
-import { MAX_FIELDS, makeBackup, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace } from "./storage.js";
-import { generatePersona } from "./personas.js";
+import { MAX_FIELDS, emptyWorkspace, makeBackup, mergeGraph, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace } from "./storage.js";
+import { CHARACTER_OPTIONS, GENDER_LABELS, VOICE_OPTIONS, generatePersona } from "./personas.js";
 import { createMailbox, deleteMailbox, getMessage, listMessages } from "./mail.js";
+import { createGraphView } from "./graph.js";
 
 const element = id => document.getElementById(id);
 const recordForm = element("record-form");
@@ -10,10 +11,10 @@ const dateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" });
 const expiryFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" });
 const years = new Intl.PluralRules("ru-RU");
 const defaultCategories = ["Заметки", "Ссылки", "Контакты", "Проекты"];
-const routes = ["overview", "data", "personas", "mail"];
+const routes = ["overview", "graph", "data", "personas", "mail"];
 const escapeCharacters = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
-let workspace = { records: [], personas: [], mailboxes: [] };
+let workspace = emptyWorkspace();
 let route = "overview";
 let editingRecordId = null;
 let profile = null;
@@ -201,8 +202,11 @@ function initials(name) {
 
 function profileText(persona) {
   const address = workspace.mailboxes.find(box => box.id === persona.mailboxId)?.address;
+  const gender = GENDER_LABELS[persona.gender];
   return [
     `${persona.name} · ${ageLabel(persona.age)}`,
+    gender ? `Пол — ${gender}` : "",
+    persona.occupation ? `Род занятий — ${persona.occupation}` : "",
     persona.description,
     persona.traits.join(", "),
     persona.style,
@@ -218,6 +222,7 @@ function renderPersonas() {
     element("persona-preview").innerHTML = emptyState("Профиль появится здесь",
       "Укажите диапазон возраста и запустите генерацию.", icon("person", "lilac"), "", false);
   } else {
+    const gender = GENDER_LABELS[profile.gender];
     const mail = workspace.mailboxes.length ? `<label class="field profile-mail">Временная почта
       <select id="profile-mailbox"><option value="">Без адреса</option>${workspace.mailboxes.map(box => `
         <option value="${escapeHtml(box.id)}" ${box.id === profile.mailboxId ? "selected" : ""}>${escapeHtml(box.address)}</option>
@@ -225,6 +230,10 @@ function renderPersonas() {
     element("persona-preview").innerHTML = `<div class="profile">
       <header class="profile-header"><span class="avatar" aria-hidden="true">${escapeHtml(initials(profile.name))}</span>
         <div><h2>${escapeHtml(profile.name)}</h2><p>${ageLabel(profile.age)} · Вымышленный профиль</p></div></header>
+      ${gender || profile.occupation ? `<dl class="profile-facts">
+        ${gender ? `<div><dt>Пол</dt><dd>${escapeHtml(gender)}</dd></div>` : ""}
+        ${profile.occupation ? `<div><dt>Род занятий</dt><dd>${escapeHtml(profile.occupation)}</dd></div>` : ""}
+      </dl>` : ""}
       <div class="profile-details">
         <section><h3>Характер</h3><p>${escapeHtml(profile.description)}</p>${chips(profile.traits)}</section>
         <section><h3>Особенности общения</h3><p>${escapeHtml(profile.style)}</p></section>
@@ -253,9 +262,9 @@ function renderPersonas() {
 function generateProfile(event) {
   event.preventDefault();
   setNotice("persona-error");
-  const fields = new FormData(event.currentTarget);
+  const { ageMin, ageMax, locale, ...options } = Object.fromEntries(new FormData(event.currentTarget));
   try {
-    profile = generatePersona(Number(fields.get("ageMin")), Number(fields.get("ageMax")), fields.get("locale"));
+    profile = generatePersona(Number(ageMin), Number(ageMax), locale, options);
     renderPersonas();
   } catch (error) {
     setNotice("persona-error", error.message);
@@ -488,6 +497,7 @@ async function importWorkspace(event) {
         changed++;
       }
       data.personas = [...personas.values()];
+      changed += mergeGraph(data.graph, backup.graph);
     });
     render();
     notify(changed ? `Импортировано элементов — ${changed}` : "Новых данных в файле нет");
@@ -501,6 +511,7 @@ function render() {
   renderRecords();
   renderPersonas();
   renderMail();
+  graphView.render();
 }
 
 function showRoute(focus = false) {
@@ -508,7 +519,7 @@ function showRoute(focus = false) {
   route = routes.includes(hash) ? hash : "overview";
   for (const view of document.querySelectorAll("[data-view]")) view.hidden = view.dataset.view !== route;
   for (const link of document.querySelectorAll("[data-route]")) {
-    if (link.dataset.route === route) link.setAttribute("aria-current", "page");
+    if (link.dataset.route === (route === "graph" ? "data" : route)) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
   }
   document.title = `${element(`${route}-title`).textContent} · Tokumei`;
@@ -517,6 +528,7 @@ function showRoute(focus = false) {
     window.scrollTo(0, 0);
   }
   if (route === "mail" && !inbox.loaded) void refreshInbox();
+  if (route === "graph") graphView.render();
 }
 
 const actions = {
@@ -632,6 +644,22 @@ window.addEventListener("storage", () => {
 setInterval(() => {
   if (route === "mail" && !document.hidden && !inbox.error && !inbox.paginated) void refreshInbox();
 }, 30000);
+
+const graphView = createGraphView({
+  getGraph: () => workspace.graph,
+  save: update => commit(data => update(data.graph)),
+  escapeHtml,
+  setNotice,
+  notify,
+  confirmRemoval,
+});
+for (const [id, options] of [
+  ["persona-gender", Object.entries(GENDER_LABELS)],
+  ["persona-character", CHARACTER_OPTIONS],
+  ["persona-voice", VOICE_OPTIONS],
+]) {
+  element(id).append(...options.map(([value, label]) => new Option(label, value)));
+}
 
 try {
   workspace = readWorkspace();
