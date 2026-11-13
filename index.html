@@ -8,8 +8,8 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.nextmail.sh https://hebezaffdeqrpjhamcqq.supabase.co; img-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
     <title>Tokumei</title>
     <link rel="icon" type="image/png" href="./favicon.png">
-    <link rel="stylesheet" href="./styles.css?v=accounts-2">
-    <script type="module" src="./js/app.js?v=accounts-2"></script>
+    <link rel="stylesheet" href="./styles.css?v=maps-1">
+    <script type="module" src="./js/app.js?v=maps-1"></script>
     <script type="module" src="./js/parallax.js?v=black-hole-1"></script>
   </head>
   <body>
@@ -140,7 +140,7 @@
 
         <section class="view" id="graph-view" data-view="graph" aria-labelledby="graph-title" hidden>
           <header class="page-heading">
-            <div><h1 id="graph-title">Карта связей</h1><p>Соединяйте людей, контакты, источники и заметки на одной схеме.</p></div>
+            <div><h1 id="graph-title">Карта связей</h1><p>Соединяйте людей, контакты, источники и заметки.</p></div>
             <button class="button primary" type="button" data-graph-action="new-node"><span class="plus" aria-hidden="true">+</span> Узел</button>
           </header>
           <div class="data-navigation">
@@ -150,6 +150,15 @@
             <div class="toolbar-actions">
               <button class="button secondary small" type="button" data-action="import">Импорт</button>
               <button class="button secondary small" type="button" data-action="export">Экспорт</button>
+            </div>
+          </div>
+          <div class="surface graph-map-bar">
+            <div class="graph-map-list" id="graph-map-list" role="group" aria-label="Карты связей"></div>
+            <div class="graph-map-actions">
+              <span class="graph-status" id="graph-map-count" aria-live="polite"></span>
+              <button class="button secondary small" id="graph-add-map" type="button" data-graph-action="add-map">+ Карта</button>
+              <button class="button secondary small" type="button" data-graph-action="rename-map">Переименовать</button>
+              <button class="button quiet small" id="graph-remove-map" type="button" data-graph-action="remove-map">Удалить карту</button>
             </div>
           </div>
           <div class="graph-layout">
@@ -220,23 +229,20 @@
               </fieldset>
               <div class="two-fields">
                 <label class="field">Пол<select name="gender" id="persona-gender"><option value="">Случайный</option></select></label>
-                <label class="field">Язык имени
-                  <select name="locale">
-                    <option value="uk">Украинский</option>
-                    <option value="ru">Русский</option>
-                    <option value="en">Английский</option>
-                  </select>
-                </label>
+                <label class="field">Регион<select name="region" id="persona-region"></select></label>
               </div>
+              <label class="field">Город<select name="city" id="persona-city"></select></label>
               <label class="field">Характер<select name="character" id="persona-character"><option value="">Случайный</option></select></label>
               <label class="field">Стиль общения<select name="voice" id="persona-voice"><option value="">По характеру</option></select></label>
               <details class="persona-overrides">
-                <summary>Указать имя или занятие</summary>
+                <summary>Имя и занятие вручную</summary>
                 <div class="persona-override-fields">
+                  <label class="field">Язык имени<select name="locale" id="persona-locale"><option value="">По городу</option></select></label>
                   <div class="two-fields">
                     <label class="field">Имя<input name="firstName" maxlength="59" placeholder="Авто"></label>
                     <label class="field">Фамилия<input name="lastName" maxlength="59" placeholder="Авто"></label>
                   </div>
+                  <label class="field">Отчество или второе имя<input name="middleName" maxlength="59" placeholder="Авто"></label>
                   <label class="field">Род занятий<input name="occupation" maxlength="100" placeholder="Авто"></label>
                 </div>
               </details>
@@ -266,7 +272,7 @@
         <button class="button icon-button" type="button" data-action="close-dialog" aria-label="Закрыть" autofocus>×</button>
       </header>
       <div class="dialog-body privacy-copy">
-        <p>Записи, карта связей и персонажи остаются в браузере. Сервер входа хранит логин, хеш пароля с солью и данные сессии. Для защиты входа используются кратковременные счётчики попыток без привязки к IP. В Tokumei нет аналитики.</p>
+        <p>Записи, карты связей и персонажи остаются в браузере. Сервер входа хранит логин, хеш пароля с солью и данные сессии. Для защиты входа используются кратковременные счётчики попыток без привязки к IP. В Tokumei нет аналитики.</p>
         <p>GitHub Pages сохраняет IP-адреса посетителей для безопасности хостинга. <a class="text-link" href="https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages#data-collection" target="_blank" rel="noopener noreferrer">Документация GitHub</a></p>
         <p>Запросы входа обрабатывает Supabase. Платформа ведёт технические журналы запросов. <a class="text-link" href="https://supabase.com/docs/guides/observability/log-field-reference" target="_blank" rel="noopener noreferrer">Документация Supabase</a></p>
         <p>Временные ящики и входящие письма обрабатывает Nextmail. Браузер обращается к нему напрямую и сохраняет доступ к ящикам в своём хранилище.</p>
@@ -304,6 +310,23 @@
       </form>
     </dialog>
 
+    <dialog id="graph-map-dialog" aria-labelledby="graph-map-title">
+      <form id="graph-map-form" class="dialog-form">
+        <header class="dialog-heading">
+          <h2 id="graph-map-title">Новая карта</h2>
+          <button class="button icon-button" type="button" data-action="close-dialog" aria-label="Закрыть">×</button>
+        </header>
+        <div class="dialog-body">
+          <label class="field">Название карты<input name="title" maxlength="80" required autofocus></label>
+          <p class="notice" id="graph-map-error" role="alert" hidden></p>
+        </div>
+        <footer class="dialog-footer">
+          <button class="button secondary" type="button" data-action="close-dialog">Отмена</button>
+          <button class="button primary" id="graph-map-submit" type="submit">Создать карту</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog id="graph-node-dialog" aria-labelledby="graph-node-title">
       <form id="graph-node-form" class="dialog-form">
         <header class="dialog-heading">
@@ -314,6 +337,7 @@
           <p class="graph-context" id="graph-node-context" hidden></p>
           <label class="field">Тип узла<select name="type" id="graph-node-type"></select></label>
           <label class="field"><span id="graph-value-label">Значение</span><input name="value" required maxlength="180" autofocus></label>
+          <label class="field" id="graph-platform-field" hidden>Площадка<select name="platform" id="graph-node-platform"></select></label>
           <label class="field">Заметка<textarea name="notes" rows="3" maxlength="4000"></textarea></label>
           <label class="field">Ссылка на источник<input name="source" type="url" maxlength="2048" placeholder="https://"></label>
           <label class="field" id="graph-node-relation" hidden>Подпись связи<input name="relation" maxlength="80" placeholder="Найдено по имени"></label>

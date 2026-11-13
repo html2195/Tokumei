@@ -1,24 +1,33 @@
-import { addGraphEdge, GRAPH_TYPES, hasGraphEdge, normalizeGraphNode, safeUrl } from "./storage.js?v=accounts-2";
+import { addGraphEdge, createMap, GRAPH_TYPES, hasGraphEdge, mapTitle, MAX_MAPS, normalizeGraphNode, safeUrl } from "./storage.js?v=maps-1";
+import { nodePlatform, platformLink, PLATFORMS, supportsPlatform } from "./platforms.js?v=maps-1";
 
 const NODE_GAP_X = 310;
 const NODE_GAP_Y = 102;
 const MAX_ZOOM = 1.8;
 const KEY_MOVES = { ArrowLeft: [-20, 0], ArrowRight: [20, 0], ArrowUp: [0, -20], ArrowDown: [0, 20] };
 
-export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify, confirmRemoval }) {
+export function createGraphView({ getMaps, updateMaps, escapeHtml, setNotice, notify, confirmRemoval }) {
   const element = id => document.getElementById(id);
   const viewport = element("graph-viewport");
   const world = element("graph-world");
   const canvas = element("graph-edges");
   const context = canvas.getContext("2d");
+  const mapDialog = element("graph-map-dialog");
+  const mapForm = element("graph-map-form");
+  const mapList = element("graph-map-list");
   const nodeDialog = element("graph-node-dialog");
   const nodeForm = element("graph-node-form");
   const nodeType = element("graph-node-type");
+  const nodePlatformSelect = element("graph-node-platform");
   const edgeDialog = element("graph-edge-dialog");
   const edgeForm = element("graph-edge-form");
   const edgeTarget = edgeForm.elements.namedItem("target");
   const camera = { x: 0, y: 0, scale: 1, minScale: 0.2 };
   let nodeButtons = new Map();
+  let activeMapId = null;
+  let mapDraft = null;
+  let saving = false;
+  let viewGeneration = 0;
   let selectedId = null;
   let nodeDraft = {};
   let edgeDraft = {};
@@ -27,6 +36,110 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
   let paintFrame = 0;
 
   nodeType.replaceChildren(...Object.entries(GRAPH_TYPES).map(([type, details]) => new Option(details.label, type)));
+  nodePlatformSelect.replaceChildren(new Option("Определить по ссылке", ""),
+    ...Object.entries(PLATFORMS).map(([key, { label }]) => new Option(label, key)));
+
+  function getGraph() {
+    const maps = getMaps();
+    return maps.find(map => map.id === activeMapId) ?? maps[0];
+  }
+
+  function save(update) {
+    const mapId = getGraph().id;
+    return updateMaps(maps => {
+      const map = maps.find(item => item.id === mapId);
+      if (!map) throw new Error("Эта карта уже удалена.");
+      update(map);
+    });
+  }
+
+  function renderMaps() {
+    const maps = getMaps();
+    const focused = document.activeElement?.dataset.mapId;
+    mapList.innerHTML = maps.map(map => {
+      const title = escapeHtml(map.title);
+      return `<button class="button secondary small graph-map-button" type="button" data-graph-action="select-map"
+        data-map-id="${escapeHtml(map.id)}" aria-pressed="${map.id === activeMapId}" title="${title}">${title}</button>`;
+    }).join("");
+    if (focused) [...mapList.children].find(button => button.dataset.mapId === focused)?.focus({ preventScroll: true });
+    element("graph-map-count").textContent = `${maps.length} / ${MAX_MAPS}`;
+    element("graph-add-map").disabled = maps.length >= MAX_MAPS;
+    element("graph-remove-map").disabled = maps.length <= 1;
+  }
+
+  function switchMap(id) {
+    if (activeMapId === id) return;
+    reset();
+    activeMapId = id;
+  }
+
+  function selectMap(id) {
+    if (!getMaps().some(map => map.id === id)) return;
+    switchMap(id);
+    render();
+    [...mapList.children].find(button => button.dataset.mapId === id)?.focus({ preventScroll: true });
+  }
+
+  function openMapDialog(rename = false) {
+    if (!rename && getMaps().length >= MAX_MAPS) return;
+    const map = getGraph();
+    mapDraft = rename ? map.id : null;
+    mapForm.elements.namedItem("title").value = rename ? map.title : "";
+    element("graph-map-title").textContent = rename ? "Переименовать карту" : "Новая карта";
+    element("graph-map-submit").textContent = rename ? "Сохранить название" : "Создать карту";
+    setNotice("graph-map-error");
+    mapDialog.showModal();
+  }
+
+  async function saveMap(event) {
+    event.preventDefault();
+    if (saving) return;
+    setNotice("graph-map-error");
+    const field = mapForm.elements.namedItem("title");
+    const title = field.value;
+    const previousId = mapDraft;
+    const generation = viewGeneration;
+    let nextId = previousId;
+    saving = true;
+    const submit = element("graph-map-submit");
+    submit.disabled = true;
+    try {
+      await updateMaps(maps => {
+        if (!previousId) {
+          nextId = createMap(maps, title).id;
+          return;
+        }
+        const map = maps.find(item => item.id === previousId);
+        if (!map) throw new Error("Эта карта уже удалена.");
+        map.title = mapTitle(title);
+      });
+      if (generation !== viewGeneration) return;
+      mapDialog.close();
+      selectMap(nextId);
+      notify(previousId ? "Название карты сохранено" : "Карта создана");
+    } catch (error) {
+      if (generation === viewGeneration) setNotice("graph-map-error", error.message);
+    } finally {
+      saving = false;
+      submit.disabled = false;
+    }
+  }
+
+  async function removeMap() {
+    if (getMaps().length <= 1) return;
+    const map = getGraph();
+    const generation = viewGeneration;
+    if (!await confirmRemoval(`Удалить карту «${map.title}»?`, "Узлы и связи этой карты будут удалены из браузера.") || generation !== viewGeneration) return;
+    await updateMaps(maps => {
+      const index = maps.findIndex(item => item.id === map.id);
+      if (index < 0) throw new Error("Эта карта уже удалена.");
+      if (maps.length <= 1) throw new Error("В рабочем пространстве должна остаться одна карта.");
+      maps.splice(index, 1);
+    });
+    if (generation !== viewGeneration) return;
+    selectMap(getGraph().id);
+    notify("Карта удалена");
+  }
 
   function getNode(id) {
     return getGraph().nodes.find(node => node.id === id);
@@ -36,6 +149,27 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     const details = GRAPH_TYPES[nodeType.value];
     element("graph-value-label").textContent = details.valueLabel;
     nodeForm.elements.namedItem("value").inputMode = details.inputMode ?? "text";
+    updatePlatformOption();
+  }
+
+  function updatePlatformOption() {
+    const type = nodeType.value;
+    nodePlatformSelect.disabled = !supportsPlatform(type);
+    element("graph-platform-field").hidden = nodePlatformSelect.disabled;
+    const value = nodeForm.elements.namedItem("value").value;
+    const source = nodeForm.elements.namedItem("source").value;
+    const platform = nodePlatform({ type, value, source });
+    nodePlatformSelect.options[0].textContent = platform ? `Авто · ${PLATFORMS[platform].label}` : "Определить по ссылке";
+  }
+
+  function nodeLabel(node, platform = nodePlatform(node)) {
+    return PLATFORMS[platform]?.label ?? GRAPH_TYPES[node.type]?.label ?? GRAPH_TYPES.note.label;
+  }
+
+  function nodeIcon(node, platform = nodePlatform(node)) {
+    const type = Object.hasOwn(GRAPH_TYPES, node.type) ? node.type : "note";
+    const id = platform || `type-${type}`;
+    return `<span class="graph-node-icon" data-platform="${platform}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><use href="./assets/graph-icons.svg#${id}"></use></svg></span>`;
   }
 
   function moveButton(button, point) {
@@ -53,13 +187,18 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
       button.dataset.type = node.type;
       button.setAttribute("aria-pressed", String(node.id === selectedId));
       moveButton(button, node);
+      const platform = nodePlatform(node);
+      const content = document.createElement("span");
+      content.className = "graph-node-content";
       const type = document.createElement("span");
       type.className = "graph-node-type";
-      type.textContent = GRAPH_TYPES[node.type].label;
+      type.textContent = nodeLabel(node, platform);
       const value = document.createElement("span");
       value.className = "graph-node-value";
       value.textContent = node.value;
-      button.append(type, value);
+      content.append(type, value);
+      button.innerHTML = nodeIcon(node, platform);
+      button.append(content);
       button.title = node.value;
       return [node.id, button];
     }));
@@ -77,10 +216,10 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     const graph = getGraph();
     const related = graph.edges.filter(edge => edge.from === node.id || edge.to === node.id);
     const source = safeUrl(node.source);
-    const valueUrl = ["link", "account"].includes(node.type) ? safeUrl(node.value) : "";
+    const valueUrl = supportsPlatform(node.type) ? safeUrl(node.value) || platformLink(node.value)?.href : "";
     const canLink = graph.nodes.some(other => other.id !== node.id && !hasGraphEdge(graph, node.id, other.id));
     inspector.innerHTML = `
-      <span class="chip">${GRAPH_TYPES[node.type].label}</span>
+      <div class="graph-inspector-type">${nodeIcon(node)}<span class="chip">${nodeLabel(node)}</span></div>
       <h2>${escapeHtml(node.value)}</h2>
       ${node.notes ? `<p class="graph-node-notes">${escapeHtml(node.notes)}</p>` : ""}
       ${valueUrl ? `<a class="text-link graph-source" href="${escapeHtml(valueUrl)}" target="_blank" rel="noopener noreferrer">Открыть ссылку</a>` : ""}
@@ -98,7 +237,7 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
         return `<li>
           <button class="graph-relation-target" type="button" data-graph-action="select-node" data-id="${escapeHtml(other.id)}">
             <span class="graph-direction" aria-hidden="true">${outgoing ? "→" : "←"}</span>
-            <span><strong>${escapeHtml(other.value)}</strong><small>${escapeHtml(edge.label || GRAPH_TYPES[other.type].label)}</small></span>
+            <span><strong>${escapeHtml(other.value)}</strong><small>${escapeHtml(edge.label || nodeLabel(other))}</small></span>
           </button>
           <button class="button secondary small" type="button" data-graph-action="edit-edge" data-id="${escapeHtml(edge.id)}" aria-label="Править связь с ${escapeHtml(other.value)}">Править</button>
         </li>`;
@@ -239,6 +378,8 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
 
   function render() {
     const graph = getGraph();
+    switchMap(graph.id);
+    renderMaps();
     if (!getNode(selectedId)) selectedId = null;
     element("graph-count").textContent = `Узлы ${graph.nodes.length} · Связи ${graph.edges.length}`;
     element("graph-empty").hidden = Boolean(graph.nodes.length);
@@ -249,10 +390,10 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     schedulePaint();
   }
 
-  function nextPosition(graph, parent) {
+  function nextPosition(graph, parent, center) {
     if (!graph.nodes.length) return { x: 0, y: 0 };
-    const x = parent ? parent.x + NODE_GAP_X : (viewport.clientWidth / 2 - camera.x) / camera.scale;
-    let y = parent ? parent.y : (viewport.clientHeight / 2 - camera.y) / camera.scale;
+    const x = parent ? parent.x + NODE_GAP_X : center.x;
+    let y = parent ? parent.y : center.y;
     while (graph.nodes.some(node => Math.abs(node.x - x) < 202 && Math.abs(node.y - y) < 87)) y += NODE_GAP_Y;
     return { x, y };
   }
@@ -266,7 +407,7 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     summary.hidden = !parent;
     element("graph-node-relation").hidden = !parent;
     nodeType.value = node?.type ?? (parent?.type === "person" ? "phone" : parent ? "note" : "person");
-    for (const field of ["value", "notes", "source"]) {
+    for (const field of ["value", "notes", "source", "platform"]) {
       nodeForm.elements.namedItem(field).value = node?.[field] ?? "";
     }
     updateNodeLabel();
@@ -274,24 +415,31 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     nodeDialog.showModal();
   }
 
-  function saveNode(event) {
+  async function saveNode(event) {
     event.preventDefault();
+    if (saving) return;
     setNotice("graph-node-error");
     const fields = Object.fromEntries(new FormData(nodeForm));
+    const draft = nodeDraft;
+    const generation = viewGeneration;
+    const center = { x: (viewport.clientWidth / 2 - camera.x) / camera.scale, y: (viewport.clientHeight / 2 - camera.y) / camera.scale };
     let saved;
     let parent;
+    const submit = event.submitter ?? nodeForm.querySelector("[type=submit]");
+    saving = submit.disabled = true;
     try {
-      save(graph => {
-        const index = graph.nodes.findIndex(node => node.id === nodeDraft.id);
-        parent = graph.nodes.find(node => node.id === nodeDraft.parentId);
-        if (nodeDraft.id && index < 0) throw new Error("Этот узел уже удалён.");
-        if (nodeDraft.parentId && !parent) throw new Error("Исходный узел уже удалён.");
-        const position = graph.nodes[index] ?? nextPosition(graph, parent);
-        saved = normalizeGraphNode({ ...fields, id: nodeDraft.id, x: position.x, y: position.y });
+      await save(graph => {
+        const index = graph.nodes.findIndex(node => node.id === draft.id);
+        parent = graph.nodes.find(node => node.id === draft.parentId);
+        if (draft.id && index < 0) throw new Error("Этот узел уже удалён.");
+        if (draft.parentId && !parent) throw new Error("Исходный узел уже удалён.");
+        const position = graph.nodes[index] ?? nextPosition(graph, parent, center);
+        saved = normalizeGraphNode({ ...fields, id: draft.id, x: position.x, y: position.y });
         if (index < 0) graph.nodes.push(saved);
         else graph.nodes[index] = saved;
         if (parent) addGraphEdge(graph, { from: parent.id, to: saved.id, label: fields.relation });
       });
+      if (generation !== viewGeneration) return;
       selectedId = saved.id;
       nodeDialog.close();
       render();
@@ -299,7 +447,9 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
       nodeButtons.get(saved.id)?.focus({ preventScroll: true });
       notify(parent ? "Узел и связь добавлены" : "Узел сохранён");
     } catch (error) {
-      setNotice("graph-node-error", error.message);
+      if (generation === viewGeneration) setNotice("graph-node-error", error.message);
+    } finally {
+      saving = submit.disabled = false;
     }
   }
 
@@ -321,52 +471,67 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     edgeDialog.showModal();
   }
 
-  function saveEdge(event) {
+  async function saveEdge(event) {
     event.preventDefault();
+    if (saving) return;
     setNotice("graph-edge-error");
     const fields = Object.fromEntries(new FormData(edgeForm));
+    const draft = edgeDraft;
+    const generation = viewGeneration;
+    const submit = event.submitter ?? edgeForm.querySelector("[type=submit]");
+    saving = submit.disabled = true;
     try {
-      save(graph => {
-        if (edgeDraft.id) {
-          const edge = graph.edges.find(item => item.id === edgeDraft.id);
+      await save(graph => {
+        if (draft.id) {
+          const edge = graph.edges.find(item => item.id === draft.id);
           if (!edge) throw new Error("Эта связь уже удалена.");
           edge.label = fields.label.trim();
         } else {
-          addGraphEdge(graph, { from: edgeDraft.from, to: fields.target, label: fields.label });
+          addGraphEdge(graph, { from: draft.from, to: fields.target, label: fields.label });
         }
       });
+      if (generation !== viewGeneration) return;
       edgeDialog.close();
       render();
       notify("Связь сохранена");
     } catch (error) {
-      setNotice("graph-edge-error", error.message);
+      if (generation === viewGeneration) setNotice("graph-edge-error", error.message);
+    } finally {
+      saving = submit.disabled = false;
     }
   }
 
   async function deleteNode() {
     const node = getNode(selectedId);
-    if (!node || !await confirmRemoval("Удалить узел?", "Узел и все его связи будут удалены с карты.")) return;
-    save(graph => {
+    const generation = viewGeneration;
+    if (!node || !await confirmRemoval("Удалить узел?", "Узел и все его связи будут удалены с карты.") || generation !== viewGeneration) return;
+    await save(graph => {
       graph.nodes = graph.nodes.filter(item => item.id !== node.id);
       graph.edges = graph.edges.filter(edge => edge.from !== node.id && edge.to !== node.id);
     });
+    if (generation !== viewGeneration) return;
     render();
     notify("Узел удалён");
   }
 
   async function deleteEdge() {
     const id = edgeDraft.id;
-    if (!id || !await confirmRemoval("Удалить связь?", "Связь будет удалена с карты.")) return;
-    save(graph => { graph.edges = graph.edges.filter(edge => edge.id !== id); });
+    const generation = viewGeneration;
+    if (!id || !await confirmRemoval("Удалить связь?", "Связь будет удалена с карты.") || generation !== viewGeneration) return;
+    await save(graph => { graph.edges = graph.edges.filter(edge => edge.id !== id); });
+    if (generation !== viewGeneration) return;
     edgeDialog.close();
     render();
     notify("Связь удалена");
   }
 
-  function savePosition(id, position) {
-    save(graph => {
+  function savePosition(id, position, relative = false) {
+    return save(graph => {
       const node = graph.nodes.find(item => item.id === id);
-      if (node) Object.assign(node, position);
+      if (node) {
+        node.x = relative ? node.x + position.x : position.x;
+        node.y = relative ? node.y + position.y : position.y;
+      }
     });
   }
 
@@ -399,41 +564,48 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     schedulePaint();
   });
 
-  function endDrag(event) {
+  async function endDrag(event) {
     if (drag?.pointer !== event.pointerId) return;
     const finished = drag;
     drag = null;
     viewport.classList.remove("dragging");
     if (!finished.position) return;
+    const generation = viewGeneration;
     try {
-      if (event.type === "pointerup") savePosition(finished.node.id, finished.position);
+      if (event.type === "pointerup") await savePosition(finished.node.id, finished.position);
     } catch (error) {
-      notify(error.message);
+      if (generation === viewGeneration) notify(error.message);
     }
-    render();
+    if (generation === viewGeneration) render();
   }
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) viewport.addEventListener(type, endDrag);
   world.addEventListener("click", event => {
     const button = event.target.closest("[data-graph-node]");
     if (button && event.detail === 0) selectNode(button.dataset.graphNode, true);
   });
-  world.addEventListener("keydown", event => {
+  world.addEventListener("keydown", async event => {
     if (!Object.hasOwn(KEY_MOVES, event.key)) return;
     const node = getNode(event.target.dataset.graphNode);
     if (!node) return;
     event.preventDefault();
     const [x, y] = KEY_MOVES[event.key];
+    const generation = viewGeneration;
     try {
-      savePosition(node.id, { x: node.x + x, y: node.y + y });
+      await savePosition(node.id, { x, y }, true);
+      if (generation !== viewGeneration) return;
       selectedId = node.id;
       render();
       selectNode(node.id, true);
     } catch (error) {
-      notify(error.message);
+      if (generation === viewGeneration) notify(error.message);
     }
   });
 
   const actions = {
+    "select-map": button => selectMap(button.dataset.mapId),
+    "add-map": () => openMapDialog(),
+    "rename-map": () => openMapDialog(true),
+    "remove-map": removeMap,
     "new-node": () => openNodeDialog(),
     "new-related": () => openNodeDialog({ parent: getNode(selectedId) }),
     "edit-node": () => openNodeDialog({ node: getNode(selectedId) }),
@@ -462,6 +634,8 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     }
   });
   nodeType.addEventListener("change", updateNodeLabel);
+  for (const name of ["value", "source"]) nodeForm.elements.namedItem(name).addEventListener("input", updatePlatformOption);
+  mapForm.addEventListener("submit", saveMap);
   nodeForm.addEventListener("submit", saveNode);
   edgeForm.addEventListener("submit", saveEdge);
   new ResizeObserver(() => {
@@ -469,11 +643,18 @@ export function createGraphView({ getGraph, save, escapeHtml, setNotice, notify,
     schedulePaint();
   }).observe(viewport);
   function reset() {
+    viewGeneration++;
+    activeMapId = null;
+    mapDraft = null;
     selectedId = null;
     fitted = false;
+    const pointer = drag?.pointer;
     drag = null;
+    if (pointer !== undefined && viewport.hasPointerCapture(pointer)) viewport.releasePointerCapture(pointer);
     nodeDraft = {};
     edgeDraft = {};
+    for (const dialog of [mapDialog, nodeDialog, edgeDialog]) if (dialog.open) dialog.close();
+    mapForm.reset();
     nodeForm.reset();
     edgeForm.reset();
     edgeTarget.replaceChildren();

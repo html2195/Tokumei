@@ -1,5 +1,10 @@
+import { PLATFORMS, supportsPlatform } from "./platforms.js?v=maps-1";
+
 const STORAGE_KEY = "tokumei.workspace.v1";
+const DEFAULT_MAP_TITLE = "Карта 1";
+const INITIAL_MAP_PREFIX = "initial-";
 export const MAX_FIELDS = 16;
+export const MAX_MAPS = 3;
 
 export const GRAPH_TYPES = {
   person: { label: "Человек", valueLabel: "Имя и фамилия" },
@@ -14,67 +19,99 @@ function emptyGraph() {
   return { nodes: [], edges: [] };
 }
 
+function defaultMap(graph = emptyGraph()) {
+  return { ...graph, id: INITIAL_MAP_PREFIX + crypto.randomUUID(), title: DEFAULT_MAP_TITLE };
+}
+
+export function mapTitle(value) {
+  const title = string(value, 80);
+  if (!title) throw new Error("Введите название карты.");
+  return title;
+}
+
+export function createMap(maps, title) {
+  if (maps.length >= MAX_MAPS) throw new Error("В рабочем пространстве можно создать до трёх карт.");
+  const map = { id: crypto.randomUUID(), title: mapTitle(title), ...emptyGraph() };
+  maps.push(map);
+  return map;
+}
+
 export function emptyWorkspace() {
-  return { version: 1, records: [], personas: [], mailboxes: [], graph: emptyGraph() };
+  return { version: 2, records: [], personas: [], mailboxes: [], maps: [defaultMap()] };
 }
 
 function readStoredWorkspace(key) {
   const raw = localStorage.getItem(key);
-  if (!raw) return emptyWorkspace();
+  if (!raw) return { data: emptyWorkspace(), migrated: true };
   const data = JSON.parse(raw);
-  if (data?.version !== 1 || ![data.records, data.personas, data.mailboxes].every(Array.isArray)) {
+  if (![1, 2].includes(data?.version) || ![data.records, data.personas, data.mailboxes].every(Array.isArray)) {
     throw new Error("Формат локального хранилища не распознан.");
   }
-  data.graph ??= emptyGraph();
-  if (!Array.isArray(data.graph.nodes) || !Array.isArray(data.graph.edges)) {
-    throw new Error("Формат карты связей не распознан.");
+  if (data.version === 1) {
+    const { graph, ...legacy } = data;
+    const maps = [defaultMap(graph ?? emptyGraph())];
+    validateMaps(maps);
+    return { data: { ...legacy, version: 2, maps }, migrated: true };
   }
-  return data;
+  validateMaps(data.maps);
+  return { data, migrated: false };
 }
 
 export function workspaceStorageKey(accountId) {
   return `${STORAGE_KEY}.account.${accountId}`;
 }
 
-export function readWorkspace(accountId) {
-  return accountId ? readStoredWorkspace(workspaceStorageKey(accountId)) : emptyWorkspace();
+function withStorageLock(key, action) {
+  return globalThis.navigator?.locks ? navigator.locks.request(key, action) : action();
 }
 
-export function updateWorkspace(accountId, update) {
-  if (!accountId) throw new Error("Войдите в Tokumei.");
-  const data = readWorkspace(accountId);
-  update(data);
+function writeWorkspace(key, data) {
   try {
-    localStorage.setItem(workspaceStorageKey(accountId), JSON.stringify(data));
+    localStorage.setItem(key, JSON.stringify(data));
   } catch {
     throw new Error("Не удалось сохранить данные в браузере. Проверьте настройки хранилища и свободное место.");
   }
-  return data;
+}
+
+export async function loadWorkspace(accountId) {
+  const key = workspaceStorageKey(accountId);
+  return withStorageLock(key, () => {
+    const { data, migrated } = readStoredWorkspace(key);
+    if (migrated) writeWorkspace(key, data);
+    return data;
+  });
+}
+
+export async function updateWorkspace(accountId, update) {
+  if (!accountId) throw new Error("Войдите в Tokumei.");
+  const key = workspaceStorageKey(accountId);
+  return withStorageLock(key, () => {
+    const { data } = readStoredWorkspace(key);
+    update(data);
+    validateMaps(data.maps);
+    writeWorkspace(key, data);
+    return data;
+  });
 }
 
 export function hasLegacyWorkspace() {
-  const legacy = readStoredWorkspace(STORAGE_KEY);
-  return Boolean(legacy.records.length || legacy.personas.length || legacy.mailboxes.length || legacy.graph.nodes.length);
-}
-
-function moveLegacyData(accountId) {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return readWorkspace(accountId);
-  const legacy = readStoredWorkspace(STORAGE_KEY);
-  const updated = updateWorkspace(accountId, current => {
-    mergeWorkspaceData(current, legacy);
-    const ids = new Set(current.mailboxes.map(box => box.id));
-    current.mailboxes.push(...legacy.mailboxes.filter(box => !ids.has(box.id)));
-  });
-  if (localStorage.getItem(STORAGE_KEY) === raw) localStorage.removeItem(STORAGE_KEY);
-  return updated;
+  const { data: legacy } = readStoredWorkspace(STORAGE_KEY);
+  return Boolean(legacy.records.length || legacy.personas.length || legacy.mailboxes.length || legacy.maps.some(map => map.nodes.length));
 }
 
 export async function moveLegacyWorkspace(accountId) {
-  if (globalThis.navigator?.locks) {
-    return navigator.locks.request("tokumei-legacy-workspace", () => moveLegacyData(accountId));
-  }
-  return moveLegacyData(accountId);
+  return withStorageLock(STORAGE_KEY, async () => {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return loadWorkspace(accountId);
+    const { data: legacy } = readStoredWorkspace(STORAGE_KEY);
+    const updated = await updateWorkspace(accountId, current => {
+      mergeWorkspaceData(current, { ...legacy, maps: [], legacyGraph: legacy.maps[0] });
+      const ids = new Set(current.mailboxes.map(box => box.id));
+      current.mailboxes.push(...legacy.mailboxes.filter(box => !ids.has(box.id)));
+    });
+    if (localStorage.getItem(STORAGE_KEY) === raw) localStorage.removeItem(STORAGE_KEY);
+    return updated;
+  });
 }
 
 function string(value, limit) {
@@ -133,12 +170,14 @@ export function normalizeGraphNode(input) {
   const rawSource = string(input.source, 2048);
   const source = safeUrl(rawSource);
   if (rawSource && !source) throw new Error("Введите адрес источника с http:// или https://.");
+  const platform = supportsPlatform(type) && typeof input.platform === "string" && Object.hasOwn(PLATFORMS, input.platform) ? input.platform : "";
   return {
     id: identifier(input.id),
     type,
     value,
     notes: string(input.notes, 4000),
     source,
+    ...(platform ? { platform } : {}),
     x: coordinate(input.x),
     y: coordinate(input.y),
   };
@@ -162,10 +201,28 @@ export function addGraphEdge(graph, input) {
   graph.edges.push({ id, from, to, label: string(input.label, 80) });
 }
 
+function isGraph(value) {
+  return Array.isArray(value?.nodes) && Array.isArray(value.edges);
+}
+
+function validateMaps(maps) {
+  if (!Array.isArray(maps) || !maps.length || maps.length > MAX_MAPS) {
+    throw new Error("В рабочем пространстве должно быть от одной до трёх карт.");
+  }
+  const ids = new Set();
+  for (const map of maps) {
+    if (!isGraph(map) || typeof map.id !== "string" || !/^[\w-]{1,128}$/.test(map.id) || ids.has(map.id)) {
+      throw new Error("Формат карты связей не распознан.");
+    }
+    mapTitle(map.title);
+    ids.add(map.id);
+  }
+}
+
 function parseGraph(input) {
   const graph = emptyGraph();
   if (input === undefined) return graph;
-  if (!Array.isArray(input?.nodes) || !Array.isArray(input.edges)) {
+  if (!isGraph(input)) {
     throw new Error("Формат карты связей в резервной копии не распознан.");
   }
   const ids = new Map();
@@ -203,7 +260,29 @@ export function mergeGraph(graph, incoming) {
 }
 
 export function mergeWorkspaceData(workspace, incoming) {
+  const maps = new Map(workspace.maps.map(map => [map.id, map]));
+  const first = workspace.maps[0];
+  if (maps.size === 1 && first.id.startsWith(INITIAL_MAP_PREFIX) && first.title === DEFAULT_MAP_TITLE && !first.nodes.length &&
+      incoming.maps.length && !incoming.maps.some(map => map.id === first.id)) {
+    maps.delete(first.id);
+  }
+  const newMaps = incoming.maps.filter(map => !maps.has(map.id));
+  if (maps.size + newMaps.length > MAX_MAPS) {
+    throw new Error("Для новых карт из копии не хватает места. Освободите место и повторите импорт.");
+  }
+
   let changed = 0;
+  for (const map of incoming.maps) {
+    const existing = maps.get(map.id);
+    if (existing) changed += mergeGraph(existing, map);
+    else {
+      maps.set(map.id, map);
+      changed += 1 + map.nodes.length + map.edges.length;
+    }
+  }
+  workspace.maps = [...maps.values()];
+  if (incoming.legacyGraph) changed += mergeGraph(workspace.maps[0], incoming.legacyGraph);
+
   const records = new Map(workspace.records.map(record => [record.id, record]));
   for (const record of incoming.records) {
     const previous = records.get(record.id);
@@ -220,11 +299,11 @@ export function mergeWorkspaceData(workspace, incoming) {
     changed++;
   }
   workspace.personas = [...personas.values()];
-  return changed + mergeGraph(workspace.graph, incoming.graph);
+  return changed;
 }
 
 function normalizePersona(input) {
-  const name = string(input?.name, 120);
+  const name = string(input?.name, 180);
   const age = input?.age;
   const description = string(input?.description, 1000);
   const style = string(input?.style, 1000);
@@ -235,6 +314,10 @@ function normalizePersona(input) {
     id: identifier(input.id), name, age, description, style,
     gender: ["male", "female"].includes(input.gender) ? input.gender : "",
     occupation: string(input.occupation, 100),
+    city: string(input.city, 100),
+    country: string(input.country, 80),
+    backstory: string(input.backstory, 1800),
+    interest: string(input.interest, 200),
     traits: (Array.isArray(input.traits) ? input.traits : []).map(trait => string(trait, 50)).filter(Boolean).slice(0, 8),
     example: string(input.example, 1000),
     createdAt: date(input.createdAt, new Date().toISOString()),
@@ -249,22 +332,24 @@ export function parseBackup(text) {
   } catch {
     throw new Error("Файл содержит некорректный JSON.");
   }
-  if (Array.isArray(data)) return { records: data.map(normalizeRecord), personas: [], graph: emptyGraph() };
-  if (data?.version !== 1 || !Array.isArray(data.records) || !Array.isArray(data.personas)) {
+  if (Array.isArray(data)) return { records: data.map(normalizeRecord), personas: [], maps: [] };
+  if (![1, 2].includes(data?.version) || !Array.isArray(data.records) || !Array.isArray(data.personas)) {
     throw new Error("Выберите резервную копию Tokumei или JSON-массив записей.");
   }
+  if (data.version === 2) validateMaps(data.maps);
   return {
     records: data.records.map(normalizeRecord),
     personas: data.personas.map(normalizePersona),
-    graph: parseGraph(data.graph),
+    maps: data.version === 2 ? data.maps.map(({ id, title, ...graph }) => ({ id, title: mapTitle(title), ...parseGraph(graph) })) : [],
+    ...(data.version === 1 && data.graph !== undefined ? { legacyGraph: parseGraph(data.graph) } : {}),
   };
 }
 
 export function makeBackup(workspace) {
   return JSON.stringify({
-    version: 1,
+    version: 2,
     records: workspace.records,
     personas: workspace.personas.map(({ mailboxId, ...persona }) => persona),
-    graph: workspace.graph,
+    maps: workspace.maps,
   }, null, 2);
 }

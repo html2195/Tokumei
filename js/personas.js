@@ -1,17 +1,4 @@
-const names = {
-  uk: [
-    [["Марко", "Данило", "Микита", "Остап", "Артем", "Назар", "Роман", "Левко"], ["Коваль", "Савчук", "Мельник", "Бондар", "Литвин", "Яремчук", "Ковальчук", "Ткаченко"]],
-    [["Соломія", "Марта", "Олеся", "Злата", "Дарина", "Ірина", "Аліна", "Віра"], ["Коваль", "Савчук", "Мельник", "Бондар", "Литвин", "Яремчук", "Ковальчук", "Ткаченко"]],
-  ],
-  ru: [
-    [["Артём", "Денис", "Илья", "Кирилл", "Роман", "Матвей", "Лев", "Глеб"], ["Волков", "Орлов", "Соколов", "Романов", "Никитин", "Лебедев", "Королёв", "Лавров"]],
-    [["Алина", "Майя", "София", "Ева", "Дарья", "Лада", "Кира", "Мария"], ["Волкова", "Орлова", "Соколова", "Романова", "Никитина", "Лебедева", "Королёва", "Лаврова"]],
-  ],
-  en: [
-    [["Elliot", "Noah", "Oliver", "Miles", "Theo", "Hugo", "Owen", "Leo"], ["Morgan", "Reed", "Bennett", "Hayes", "Brooks", "Ellis", "West", "Foster"]],
-    [["June", "Ellie", "Iris", "Chloe", "Sophie", "Maya", "Nora", "Alice"], ["Morgan", "Reed", "Bennett", "Hayes", "Brooks", "Ellis", "West", "Foster"]],
-  ],
-};
+import { CITIES, LIFE_STAGES, NAME_POOLS } from "./persona-data.js?v=maps-1";
 
 export const GENDER_LABELS = { male: "Мужской", female: "Женский" };
 
@@ -132,22 +119,35 @@ const voices = {
 
 export const CHARACTER_OPTIONS = personalities.map(({ key, label }) => [key, label]);
 export const VOICE_OPTIONS = Object.entries(voices).map(([key, voice]) => [key, voice.label]);
+export const NAME_OPTIONS = Object.entries(NAME_POOLS).map(([key, pool]) => [key, pool.label]);
 
 function pick(values) {
   return values[Math.floor(Math.random() * values.length)];
 }
 
-function defaultOccupation(age) {
-  if (age < 3) return "";
-  if (age < 7) return "Детский сад";
-  if (age < 17) return "Учёба в школе";
-  if (age < 22) return pick(["Учёба в колледже", "Учёба в университете", "Стажировка в студии дизайна"]);
-  if (age >= 65) return pick(["На пенсии", "Наставничество", "Работа в библиотеке"]);
-  return pick(["Разработка ПО", "Дизайн", "Ремонт техники", "Организация мероприятий", "Фотография", "Работа в библиотеке"]);
-}
-
 function customField(value, length) {
   return typeof value === "string" ? value.trim().slice(0, length) : "";
+}
+
+function fullName(pool, gender, options) {
+  const first = customField(options.firstName, 59) || pick(pool[gender]);
+  const surname = pick(pool.surnames);
+  const last = customField(options.lastName, 59) || (gender === "female" && pool.femaleSurname ? pool.femaleSurname(surname) : surname);
+  const patronymic = pool.patronymics ? pick(pool.patronymics)[gender === "male" ? 0 : 1] : "";
+  const middle = customField(options.middleName, 59) || patronymic;
+  return [first, middle, last].filter(Boolean).join(" ");
+}
+
+function background(age, gender, options) {
+  const stage = LIFE_STAGES.find(({ before }) => age < before);
+  const endings = gender === "female" ? { a: "а", la: "ла", sa: "ась" } : { a: "", la: "", sa: "ся" };
+  const beginning = pick(stage.beginnings).replace(/\{(a|la|sa)\}/g, (_, ending) => endings[ending]);
+  const [interest, current] = pick(stage.activities);
+  return {
+    occupation: customField(options.occupation, 100) || pick(stage.occupations),
+    interest,
+    backstory: `${beginning}\n\n${current}`,
+  };
 }
 
 export function generatePersona(min, max, locale, options = {}) {
@@ -156,9 +156,10 @@ export function generatePersona(min, max, locale, options = {}) {
   }
   const age = min + Math.floor(Math.random() * (max - min + 1));
   const gender = Object.hasOwn(GENDER_LABELS, options.gender) ? options.gender : pick(Object.keys(GENDER_LABELS));
-  const [firstNames, surnames] = (Object.hasOwn(names, locale) ? names[locale] : names.uk)[gender === "male" ? 0 : 1];
-  const firstName = customField(options.firstName, 59) || pick(firstNames);
-  const lastName = customField(options.lastName, 59) || pick(surnames);
+  const defaultRegion = locale === "ru" ? "russia" : locale === "en" ? "europe" : "ukraine";
+  const cities = Object.hasOwn(CITIES, options.region) ? CITIES[options.region] : CITIES[defaultRegion];
+  const { city, country, locale: cityLocale } = cities.find(item => item.id === options.city) ?? pick(cities);
+  const namePool = Object.hasOwn(NAME_POOLS, locale) ? NAME_POOLS[locale] : NAME_POOLS[cityLocale];
   const selected = personalities.find(character => character.key === options.character);
   const youth = age < 3 ? youngPersonalities[0] : age < 7 ? youngPersonalities[1] : age < 13 ? youngPersonalities[2] : null;
   const personality = youth ?? selected ?? pick(personalities);
@@ -168,9 +169,10 @@ export function generatePersona(min, max, locale, options = {}) {
   const [style, example] = voice ? voice[age < 3 ? "infant" : age < 13 ? "child" : "adult"] : [personality.style, personality.example];
   return {
     id: crypto.randomUUID(),
-    name: `${firstName} ${lastName}`,
+    name: fullName(namePool, gender, options),
     age, gender, description, traits, style, example,
-    occupation: customField(options.occupation, 100) || defaultOccupation(age),
+    city, country,
+    ...background(age, gender, options),
     createdAt: new Date().toISOString(),
     mailboxId: null,
   };

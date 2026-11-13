@@ -1,11 +1,13 @@
-import { MAX_FIELDS, emptyWorkspace, hasLegacyWorkspace, makeBackup, mergeWorkspaceData, moveLegacyWorkspace, normalizeRecord, parseBackup, readWorkspace, safeUrl, updateWorkspace, workspaceStorageKey } from "./storage.js?v=accounts-2";
-import { CHARACTER_OPTIONS, GENDER_LABELS, VOICE_OPTIONS, generatePersona } from "./personas.js?v=f977e0b";
+import { MAX_FIELDS, emptyWorkspace, hasLegacyWorkspace, loadWorkspace, makeBackup, mergeWorkspaceData, moveLegacyWorkspace, normalizeRecord, parseBackup, safeUrl, updateWorkspace, workspaceStorageKey } from "./storage.js?v=maps-1";
+import { CHARACTER_OPTIONS, GENDER_LABELS, NAME_OPTIONS, VOICE_OPTIONS, generatePersona } from "./personas.js?v=maps-1";
+import { CITIES, REGIONS } from "./persona-data.js?v=maps-1";
 import { createMailbox, deleteMailbox, getMessage, listMessages } from "./mail.js";
-import { createGraphView } from "./graph.js?v=accounts-2";
+import { createGraphView } from "./graph.js?v=maps-1";
 import { authenticate, endSession, generateLogin, restoreSession } from "./auth.js?v=accounts-2";
 
 const element = id => document.getElementById(id);
 const recordForm = element("record-form");
+const recordSubmit = recordForm.querySelector('button[type="submit"]');
 const recordDialog = element("record-dialog");
 const messageDialog = element("message-dialog");
 const dateFormat = new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium" });
@@ -66,8 +68,8 @@ function setNotice(id, message = "") {
   notice.hidden = !message;
 }
 
-function commit(update, ownerId = account?.id) {
-  const saved = updateWorkspace(ownerId, update);
+async function commit(update, ownerId = account?.id) {
+  const saved = await updateWorkspace(ownerId, update);
   if (account?.id === ownerId) workspace = saved;
 }
 
@@ -80,17 +82,19 @@ function updateLegacyPanel() {
   }
 }
 
-function changeAccount(next) {
-  account = next;
-  accountGeneration++;
-  workspace = emptyWorkspace();
+async function changeAccount(next) {
+  const generation = ++accountGeneration;
+  let data = emptyWorkspace();
   if (next) {
     try {
-      workspace = readWorkspace(next.id);
+      data = await loadWorkspace(next.id);
     } catch {
       notify("Не удалось прочитать данные учётной записи в этом браузере.");
     }
   }
+  if (generation !== accountGeneration) return;
+  account = next;
+  workspace = data;
   profile = null;
   editingRecordId = null;
   mailboxId = null;
@@ -107,6 +111,7 @@ function changeAccount(next) {
   element("record-search").value = "";
   element("category-filter").value = "";
   element("persona-form").reset();
+  updatePersonaCities();
   setNotice("mail-error");
   setNotice("persona-error");
   graphView.reset();
@@ -162,7 +167,7 @@ async function submitAuth(event) {
   setNotice("auth-error");
   setAuthBusy(true);
   try {
-    changeAccount(await authenticate(authMode, login, password));
+    await changeAccount(await authenticate(authMode, login, password));
     element("auth-form").reset();
     element("workspace").focus({ preventScroll: true });
   } catch (error) {
@@ -175,7 +180,7 @@ async function submitAuth(event) {
 
 async function signOut() {
   const revocation = endSession();
-  changeAccount(null);
+  await changeAccount(null);
   setAuthMode("login");
   element("auth-login").focus();
   try {
@@ -255,6 +260,7 @@ function addField(field = {}, focus = false) {
 }
 
 function openRecord(record) {
+  if (recordSubmit.disabled) return;
   editingRecordId = record?.id ?? null;
   recordForm.reset();
   setNotice("record-error");
@@ -277,9 +283,13 @@ function openRecord(record) {
   recordDialog.showModal();
 }
 
-function saveRecord(event) {
+async function saveRecord(event) {
   event.preventDefault();
+  if (recordSubmit.disabled) return;
+  const generation = accountGeneration;
+  const id = editingRecordId;
   setNotice("record-error");
+  recordSubmit.disabled = true;
   try {
     const fields = Array.from(element("custom-fields").children, row => ({
       name: row.children[0].value.trim(), value: row.children[1].value.trim(),
@@ -289,19 +299,22 @@ function saveRecord(event) {
     }
     const input = Object.fromEntries(new FormData(recordForm));
     const now = new Date().toISOString();
-    commit(data => {
-      const index = data.records.findIndex(record => record.id === editingRecordId);
-      if (editingRecordId && index < 0) throw new Error("Эта запись уже удалена.");
-      const record = normalizeRecord({ ...input, fields, id: editingRecordId,
+    await commit(data => {
+      const index = data.records.findIndex(record => record.id === id);
+      if (id && index < 0) throw new Error("Эта запись уже удалена.");
+      const record = normalizeRecord({ ...input, fields, id,
         createdAt: data.records[index]?.createdAt ?? now, updatedAt: now });
       if (index === -1) data.records.push(record);
       else data.records[index] = record;
     });
+    if (generation !== accountGeneration) return;
     recordDialog.close();
     render();
     notify("Запись сохранена");
   } catch (error) {
-    setNotice("record-error", error.message);
+    if (generation === accountGeneration) setNotice("record-error", error.message);
+  } finally {
+    recordSubmit.disabled = false;
   }
 }
 
@@ -318,16 +331,26 @@ function confirmRemoval(title, description) {
 }
 
 function initials(name) {
-  return name.trim().split(/\s+/).slice(0, 2).map(part => Array.from(part)[0]).join("").toUpperCase();
+  const parts = name.trim().split(/\s+/);
+  const initials = parts.length > 1 ? [parts[0], parts.at(-1)] : parts;
+  return initials.map(part => Array.from(part)[0]).join("").toUpperCase();
+}
+
+function profileLocation(persona) {
+  return [persona.city, persona.country].filter(Boolean).join(", ");
 }
 
 function profileText(persona) {
   const address = workspace.mailboxes.find(box => box.id === persona.mailboxId)?.address;
   const gender = GENDER_LABELS[persona.gender];
+  const location = profileLocation(persona);
   return [
     `${persona.name} · ${ageLabel(persona.age)}`,
     gender ? `Пол — ${gender}` : "",
+    location ? `Место жительства — ${location}` : "",
     persona.occupation ? `Род занятий — ${persona.occupation}` : "",
+    persona.interest ? `Увлечение — ${persona.interest}` : "",
+    persona.backstory ? `Предыстория\n${persona.backstory}` : "",
     persona.description,
     persona.traits.join(", "),
     persona.style,
@@ -344,6 +367,7 @@ function renderPersonas() {
       "Укажите диапазон возраста и запустите генерацию.", icon("person", "lilac"), "", false);
   } else {
     const gender = GENDER_LABELS[profile.gender];
+    const location = profileLocation(profile);
     const mail = workspace.mailboxes.length ? `<label class="field profile-mail">Временная почта
       <select id="profile-mailbox"><option value="">Без адреса</option>${workspace.mailboxes.map(box => `
         <option value="${escapeHtml(box.id)}" ${box.id === profile.mailboxId ? "selected" : ""}>${escapeHtml(box.address)}</option>
@@ -351,11 +375,14 @@ function renderPersonas() {
     element("persona-preview").innerHTML = `<div class="profile">
       <header class="profile-header"><span class="avatar" aria-hidden="true">${escapeHtml(initials(profile.name))}</span>
         <div><h2>${escapeHtml(profile.name)}</h2><p>${ageLabel(profile.age)} · Вымышленный профиль</p></div></header>
-      ${gender || profile.occupation ? `<dl class="profile-facts">
+      ${gender || location || profile.occupation || profile.interest ? `<dl class="profile-facts">
         ${gender ? `<div><dt>Пол</dt><dd>${escapeHtml(gender)}</dd></div>` : ""}
+        ${location ? `<div><dt>Город</dt><dd>${escapeHtml(location)}</dd></div>` : ""}
         ${profile.occupation ? `<div><dt>Род занятий</dt><dd>${escapeHtml(profile.occupation)}</dd></div>` : ""}
+        ${profile.interest ? `<div><dt>Увлечение</dt><dd>${escapeHtml(profile.interest)}</dd></div>` : ""}
       </dl>` : ""}
       <div class="profile-details">
+        ${profile.backstory ? `<section><h3>Предыстория</h3><p>${escapeHtml(profile.backstory)}</p></section>` : ""}
         <section><h3>Характер</h3><p>${escapeHtml(profile.description)}</p>${chips(profile.traits)}</section>
         <section><h3>Особенности общения</h3><p>${escapeHtml(profile.style)}</p></section>
         ${profile.example ? `<section><h3>Пример ${profile.age < 3 ? "реакции" : "реплики"}</h3>
@@ -375,7 +402,7 @@ function renderPersonas() {
         <button class="card-button" type="button" data-action="open-persona" data-id="${escapeHtml(persona.id)}"
           aria-pressed="${profile?.id === persona.id}">
           <span class="avatar" aria-hidden="true">${escapeHtml(initials(persona.name))}</span>
-          <span><span class="card-title">${escapeHtml(persona.name)}</span><span class="saved-age">${ageLabel(persona.age)}</span></span>
+          <span><span class="card-title">${escapeHtml(persona.name)}</span><span class="saved-age">${ageLabel(persona.age)}${persona.city ? ` · ${escapeHtml(persona.city)}` : ""}</span></span>
         </button></article>`).join("")
     : emptyState("Список пока пуст", "Сохраните сгенерированный профиль, чтобы вернуться к нему позже.");
 }
@@ -392,18 +419,28 @@ function generateProfile(event) {
   }
 }
 
-function updateProfileMailbox(id) {
+function updatePersonaCities() {
+  const region = element("persona-region").value;
+  const cities = CITIES[region] ?? CITIES.ukraine;
+  element("persona-city").replaceChildren(new Option("Случайный город", ""), ...cities.map(({ id, city, country }) =>
+    new Option(region === "europe" ? `${city}, ${country}` : city, id)));
+}
+
+async function updateProfileMailbox(id) {
   if (!profile) return;
+  const generation = accountGeneration;
   const mailbox = workspace.mailboxes.find(box => box.id === id);
   const next = { ...profile, mailboxId: mailbox?.id ?? null };
   if (workspace.personas.some(persona => persona.id === profile.id)) {
-    commit(data => {
+    await commit(data => {
       const persona = data.personas.find(persona => persona.id === next.id);
+      if (next.mailboxId && !data.mailboxes.some(box => box.id === next.mailboxId)) next.mailboxId = null;
       if (persona) persona.mailboxId = next.mailboxId;
     });
   }
+  if (generation !== accountGeneration || profile?.id !== next.id) return;
   profile = next;
-  notify(mailbox ? "Адрес привязан к профилю" : "Адрес отвязан");
+  notify(next.mailboxId ? "Адрес привязан к профилю" : "Адрес отвязан");
 }
 
 function newInbox() {
@@ -494,9 +531,9 @@ async function addMailbox() {
   renderMail();
   let mailbox;
   try {
-    commit(() => {}, ownerId);
+    await commit(() => {}, ownerId);
     mailbox = await createMailbox();
-    commit(data => { data.mailboxes.push(mailbox); }, ownerId);
+    await commit(data => { data.mailboxes.push(mailbox); }, ownerId);
     if (generation !== accountGeneration) return;
     mailboxId = mailbox.id;
     inbox = newInbox();
@@ -531,7 +568,7 @@ async function removeMailbox() {
   renderMail();
   try {
     await deleteMailbox(mailbox);
-    commit(data => {
+    await commit(data => {
       data.mailboxes = data.mailboxes.filter(box => box.id !== mailbox.id);
       for (const persona of data.personas) {
         if (persona.mailboxId === mailbox.id) persona.mailboxId = null;
@@ -612,7 +649,8 @@ async function importWorkspace(event) {
     const backup = parseBackup(await file.text());
     if (generation !== accountGeneration) return;
     let changed = 0;
-    commit(data => { changed = mergeWorkspaceData(data, backup); });
+    await commit(data => { changed = mergeWorkspaceData(data, backup); });
+    if (generation !== accountGeneration) return;
     render();
     notify(changed ? `Импортировано элементов — ${changed}` : "Новых данных в файле нет");
   } catch (error) {
@@ -675,15 +713,17 @@ const actions = {
     element("add-custom-field").focus();
   },
   "delete-record": async () => {
+    const generation = accountGeneration;
     const id = editingRecordId;
     if (!await confirmRemoval("Удалить запись?", "Запись будет удалена из рабочего пространства.")) return;
     try {
-      commit(data => { data.records = data.records.filter(record => record.id !== id); });
+      await commit(data => { data.records = data.records.filter(record => record.id !== id); });
+      if (generation !== accountGeneration) return;
       recordDialog.close();
       render();
       notify("Запись удалена");
     } catch (error) {
-      setNotice("record-error", error.message);
+      if (generation === accountGeneration) setNotice("record-error", error.message);
     }
   },
   "clear-filters": () => {
@@ -694,11 +734,16 @@ const actions = {
   },
   import: () => element("import-file").click(),
   export: exportWorkspace,
-  "save-persona": () => {
-    if (!profile) return;
-    commit(data => {
-      if (!data.personas.some(persona => persona.id === profile.id)) data.personas.push(profile);
+  "save-persona": async () => {
+    const candidate = profile;
+    const generation = accountGeneration;
+    if (!candidate) return;
+    await commit(data => {
+      if (data.personas.some(persona => persona.id === candidate.id)) return;
+      const mailboxId = data.mailboxes.some(box => box.id === candidate.mailboxId) ? candidate.mailboxId : null;
+      data.personas.push({ ...candidate, mailboxId });
     });
+    if (generation !== accountGeneration) return;
     render();
     notify("Профиль сохранён");
   },
@@ -711,9 +756,11 @@ const actions = {
   },
   "copy-persona": () => profile && copyText(profileText(profile), "Профиль скопирован"),
   "delete-persona": async () => {
+    const generation = accountGeneration;
     const id = profile?.id;
     if (!id || !await confirmRemoval("Удалить персонажа?", "Профиль будет удалён из списка сохранённых.")) return;
-    commit(data => { data.personas = data.personas.filter(persona => persona.id !== id); });
+    await commit(data => { data.personas = data.personas.filter(persona => persona.id !== id); });
+    if (generation !== accountGeneration) return;
     if (profile?.id === id) profile = null;
     render();
     notify("Профиль удалён");
@@ -746,11 +793,13 @@ document.addEventListener("click", async event => {
     notify(error.message);
   }
 });
-document.addEventListener("change", event => {
+document.addEventListener("change", async event => {
   if (event.target.id !== "profile-mailbox") return;
+  const generation = accountGeneration;
   try {
-    updateProfileMailbox(event.target.value);
+    await updateProfileMailbox(event.target.value);
   } catch (error) {
+    if (generation !== accountGeneration) return;
     event.target.value = profile?.mailboxId ?? "";
     notify(error.message);
   }
@@ -761,22 +810,26 @@ document.querySelector(".skip-link").addEventListener("click", event => {
 });
 recordForm.addEventListener("submit", saveRecord);
 element("persona-form").addEventListener("submit", generateProfile);
+element("persona-region").addEventListener("change", updatePersonaCities);
 element("record-search").addEventListener("input", renderRecords);
 element("category-filter").addEventListener("change", renderRecords);
 element("import-file").addEventListener("change", importWorkspace);
 window.addEventListener("hashchange", () => showRoute(true));
-window.addEventListener("storage", event => {
+window.addEventListener("storage", async event => {
   if (!account) return;
+  const generation = accountGeneration;
   updateLegacyPanel();
   if (event.key && event.key !== workspaceStorageKey(account.id)) return;
   try {
+    const data = await loadWorkspace(account.id);
+    if (generation !== accountGeneration) return;
     const wasSaved = workspace.personas.some(persona => persona.id === profile?.id);
-    workspace = readWorkspace(account.id);
+    workspace = data;
     if (wasSaved && !workspace.personas.some(persona => persona.id === profile?.id)) profile = null;
     render();
     if (route === "mail" && !inbox.loaded) void refreshInbox();
   } catch (error) {
-    notify(error.message);
+    if (generation === accountGeneration) notify(error.message);
   }
 });
 setInterval(() => {
@@ -784,8 +837,8 @@ setInterval(() => {
 }, 30000);
 
 const graphView = createGraphView({
-  getGraph: () => workspace.graph,
-  save: update => commit(data => update(data.graph)),
+  getMaps: () => workspace.maps,
+  updateMaps: update => commit(data => update(data.maps)),
   escapeHtml,
   setNotice,
   notify,
@@ -793,11 +846,14 @@ const graphView = createGraphView({
 });
 for (const [id, options] of [
   ["persona-gender", Object.entries(GENDER_LABELS)],
+  ["persona-region", Object.entries(REGIONS)],
+  ["persona-locale", NAME_OPTIONS],
   ["persona-character", CHARACTER_OPTIONS],
   ["persona-voice", VOICE_OPTIONS],
 ]) {
   element(id).append(...options.map(([value, label]) => new Option(label, value)));
 }
+updatePersonaCities();
 
 for (const button of document.querySelectorAll("[data-auth-mode]")) {
   button.addEventListener("click", () => {
@@ -814,7 +870,7 @@ setAuthMode("login");
 setAuthBusy(true);
 try {
   const savedAccount = await restoreSession();
-  if (savedAccount) changeAccount(savedAccount);
+  if (savedAccount) await changeAccount(savedAccount);
 } catch (error) {
   setNotice("auth-error", error.message);
 } finally {

@@ -398,6 +398,7 @@ legend { margin-bottom: 8px; padding: 0; font-size: 13px; font-weight: 650; }
 .profile-facts { display: flex; flex-wrap: wrap; gap: 10px 24px; margin: 16px 0; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--control-radius); background: var(--control); font-size: 13px; }
 .profile-facts dt { color: var(--muted); font-size: 12px; }
 .profile-facts dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.profile-facts > div { min-width: 0; }
 .profile-details { display: grid; gap: 14px; margin: 16px 0; }
 .profile-details p { margin-top: 4px; line-height: 1.55; color: var(--body); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .profile-details blockquote { margin: 5px 0 0; border-left: 2px solid var(--selected-line); padding: 4px 10px; color: var(--body); line-height: 1.5; font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -427,6 +428,13 @@ legend { margin-bottom: 8px; padding: 0; font-size: 13px; font-weight: 650; }
 .message-row:last-child { border-radius: 0 0 var(--radius) var(--radius); }
 .notice { margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--danger-line); border-radius: var(--control-radius); color: var(--danger); background: var(--danger-panel); font-size: 14px; }
 
+.graph-map-bar, .graph-map-list, .graph-map-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.graph-map-bar { justify-content: space-between; margin-bottom: 14px; padding: 9px 11px; }
+.graph-map-list { flex: 1 1 220px; min-width: 0; }
+.graph-map-button { display: block; max-width: min(100%, 190px); overflow: hidden; text-overflow: ellipsis; }
+.graph-map-button[aria-pressed="true"] { border-color: var(--selected-line); background: var(--selected); color: var(--accent); }
+.graph-map-actions .graph-status { margin-inline: 3px; white-space: nowrap; }
+.graph-map-actions button:disabled { cursor: default; }
 .graph-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 290px); gap: 14px; align-items: start; }
 .graph-toolbar, .graph-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
 .graph-toolbar { justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
@@ -449,9 +457,10 @@ legend { margin-bottom: 8px; padding: 0; font-size: 13px; font-weight: 650; }
   --node-color: var(--green);
   position: absolute;
   display: grid;
-  align-content: center;
-  gap: 5px;
-  width: 176px;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 194px;
   height: 74px;
   padding: 8px 10px;
   border: 1px solid var(--control-line);
@@ -470,12 +479,32 @@ legend { margin-bottom: 8px; padding: 0; font-size: 13px; font-weight: 650; }
 .graph-node[data-type="link"] { --node-color: #a0d7ed; }
 .graph-node:hover { background: var(--hover); }
 .graph-node[aria-pressed="true"] { z-index: 1; border-color: var(--accent); background: var(--selected); }
+.graph-node-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, currentColor 26%, var(--line));
+  border-radius: var(--control-radius);
+  color: var(--platform-color, var(--node-color, var(--accent)));
+  background: color-mix(in srgb, currentColor 11%, var(--control));
+}
+.graph-node-icon svg { width: 16px; height: 16px; }
+.graph-node-icon:is([data-platform="telegram"], [data-platform="bluesky"], [data-platform="vk"], [data-platform="facebook"]) { --platform-color: #70c7f5; }
+.graph-node-icon:is([data-platform="github"], [data-platform="x"], [data-platform="threads"]) { --platform-color: #eee7fa; }
+.graph-node-icon:is([data-platform="instagram"], [data-platform="youtube"], [data-platform="reddit"], [data-platform="pinterest"]) { --platform-color: #ff849d; }
+.graph-node-icon:is([data-platform="discord"], [data-platform="signal"], [data-platform="viber"], [data-platform="mastodon"], [data-platform="twitch"]) { --platform-color: #b4a4ff; }
+.graph-node-icon:is([data-platform="whatsapp"], [data-platform="spotify"]) { --platform-color: #73e5a5; }
+.graph-node-icon:is([data-platform="steam"], [data-platform="tiktok"]) { --platform-color: #a0d7ed; }
+.graph-node-icon[data-platform="gitlab"] { --platform-color: #ffab7c; }
+.graph-node-icon[data-platform="snapchat"] { --platform-color: #f8e76f; }
+.graph-node-content { display: grid; gap: 4px; min-width: 0; }
 .graph-node-type { color: var(--node-color); font-family: var(--mono); font-size: 11px; }
 .graph-node-value { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-size: 14px; line-height: 1.25; font-weight: 650; }
 .graph-help { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .graph-inspector { display: grid; gap: 9px; padding: 14px; }
 .graph-inspector h2, .graph-node-notes, .graph-context { overflow-wrap: anywhere; }
-.graph-inspector > .chip { justify-self: start; }
+.graph-inspector-type { display: flex; align-items: center; gap: 7px; }
 .graph-context, .graph-node-notes { font-size: 13px; line-height: 1.45; color: var(--muted); }
 .graph-node-notes { white-space: pre-wrap; }
 .graph-source { justify-self: start; font-size: 13px; }
@@ -556,6 +585,7 @@ dialog::backdrop { background: #05030acb; }
   .metric > span:last-child { font-size: 11px; line-height: 1.25; }
   .metric-arrow { right: 8px; top: 9px; }
   .overview-grid, .generator-grid, .mail-layout { grid-template-columns: minmax(0, 1fr); }
+  .graph-map-actions .button { padding-inline: 6px; font-size: 11px; }
   .data-toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .search-field { grid-column: 1 / -1; }
   .toolbar-actions { justify-content: end; }
